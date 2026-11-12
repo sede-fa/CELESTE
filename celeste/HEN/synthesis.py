@@ -456,10 +456,7 @@ class HENSynthesiser:
 
     def targets(self) -> pd.Series:
         """Energy targets of the pinch analysis for the same streams and dt_min."""
-        seg = self.segments.copy()
-        if "segment_id" not in seg.columns:
-            seg = seg.rename_axis("segment_id").reset_index()
-        return PinchAnalyser(seg, self.dt_min).solve().summary()
+        return PinchAnalyser(self.segments, self.dt_min).solve().summary()
 
     def summary(self) -> pd.Series:
         """Key figures of the network next to the pinch targets."""

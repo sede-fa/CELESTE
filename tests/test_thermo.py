@@ -71,7 +71,7 @@ def test_numpy_and_jax_kernels_agree():
 def test_scalar_fast_path_equals_generic_kernel():
     d = nasa.nasa_data(['H2', 'CH4', 'CO2', 'CO', 'H2O', 'N2'])
     for T in (200.0, 200.5, 999.999, 1000.0, 1000.001, 5999.0, 6000.0):
-        fast = nasa.pure_props_scalar(T, d.a, d.T_break)
+        fast = tuple(nasa.pure_props_scalar(T, d.a, d.T_break))
         generic = nasa.pure_props(np, T, d.a, d.T_break, d.T_lo, d.T_hi)
         for a, b in zip(fast, generic):
             np.testing.assert_allclose(a, b, rtol=1e-13)

@@ -196,8 +196,7 @@ def pure_props_scalar(T, a, T_break):
         (-iT, lnT, T, 0.5 * T2, T3 / 3.0, 0.25 * T4, 0.2 * T4 * T, 1.0, 0.0),
         (-0.5 * iT * iT, -iT, lnT, T, 0.5 * T2, T3 / 3.0, 0.25 * T4, 0.0, 1.0),
     ))
-    out = (R * basis) @ c.T                                             # (3, Ns)
-    return out[0], out[1], out[2]
+    return (R * basis) @ c.T                                            # (3, Ns): rows cp_i, h_i, s_i
 
 
 def mix_props(xp, X, P, cp_i, h_i, s_i, condensed):

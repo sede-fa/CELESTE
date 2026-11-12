@@ -106,18 +106,17 @@ class Thermo:
         '''Species properties at the current T: sets cp_i, h_i, s_i, g_i (each of shape nSpecies).'''
         T = self._T
         if self._T_fit_lo <= T <= self._T_fit_hi:
-            self.cp_i, self.h_i, self.s_i = _nasa.pure_props_scalar(T, self._a, self._T_break)
+            M = _nasa.pure_props_scalar(T, self._a, self._T_break)
         else:
-            self.cp_i, self.h_i, self.s_i = _nasa.pure_props(np, T, self._a, self._T_break,
-                                                             self._data.T_lo, self._data.T_hi)
+            M = np.stack(_nasa.pure_props(np, T, self._a, self._T_break, self._data.T_lo, self._data.T_hi))
+        self._M = M                                   # (3, nSpecies): one product gives all mixture sums
+        self.cp_i, self.h_i, self.s_i = M
         self.g_i = self.h_i - T*self.s_i
 
     def calcThermoMix(self):
         '''Mixture properties at the current T, P, Xi: sets cp, h, s_T, s, g.'''
-        X = np.asarray(self._Xi, dtype=float)
-        self.cp = X @ self.cp_i
-        self.h = X @ self.h_i
-        self.s_T = X @ self.s_i
+        X = self._Xi if type(self._Xi) is np.ndarray and self._Xi.dtype == np.float64 else np.asarray(self._Xi, dtype=float)
+        self.cp, self.h, self.s_T = self._M @ X
         if X.size and X.min() > 0.0:
             s_mix = (X*np.log(X*self._P)) @ self._gas
         else:

@@ -33,6 +33,8 @@ def test_pinch_targets(four_streams):
     assert len(fig.axes) == 2
     with pytest.raises(RuntimeError):
         PinchAnalyser(four_streams, 20).summary()
+    indexed = PinchAnalyser(four_streams.set_index('segment_id'), 20).solve()       # names as index work too
+    assert indexed.hot_utility == pytest.approx(107.5)
 
 
 def test_network_reaches_the_pinch_targets_when_energy_dominates(four_streams):
