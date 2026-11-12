@@ -12,9 +12,9 @@ Behaviour that is intended but surprising is listed in
 
 ## Packaging
 
-- The repository has no version tags; the version is derived from the commit
-  count (`0.0.1.devN`).
-- `.gitattributes` refers to `CELESTE2/_version.py`, which does not exist.
+- The repository has no release tag yet, so the version is derived from the
+  commit count (`0.0.1.devN`) until the first release is tagged (see
+  `docs/conventions.md`, *Releases*).
 
 ## Heat integration
 

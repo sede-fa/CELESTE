@@ -80,6 +80,8 @@ version may notice.
   surroundings (`Q_amb`, so the energy balance closes), consistent `Exloss` and `Sgen`. `GPU_2S` is `GPU_2SV2`
   with one component removed; `GPU_3S` sets the F3 composition to the species marked −1; an empty outlet keeps a
   valid composition; `Sep` is checked. State keywords as in the other units.
+- Removed `.gitattributes` (it referred to `CELESTE2/_version.py`, which does not exist); releases are tags on
+  `main` (`docs/conventions.md`).
 - `SOC` accepts `T_soc0`, `T_soc1`, `P_soc` in addition to `Tsoc0`, `Tsoc1`.
 
 ### Fixed

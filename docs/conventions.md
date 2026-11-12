@@ -219,3 +219,14 @@ The old name keeps working and warns once per call site. Record it in
 Every model has at least one test in `tests/` that checks the mass (or element)
 balance, the energy balance, the sign of the entropy generation and one
 reference value. Run `python -m pytest` before sharing a change.
+
+## Releases
+
+Releases are git tags on `main` of the form `vX.Y.Z`. The package version comes
+from the tag through `hatch-vcs` (`[tool.hatch.version] source = "vcs"`); there
+is no version number in the source tree. Between releases the version is
+`X.Y.(Z+1).devN`, N being the number of commits since the last tag.
+
+1. Move the *Unreleased* section of `CHANGELOG.md` under the new version number.
+2. Tag the merge commit on `main`: `git tag -a v0.1.0 -m "CELESTE 0.1.0"` and push the tag.
+3. `python -m build` produces the wheel and sdist with that version.
