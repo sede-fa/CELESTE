@@ -127,3 +127,16 @@ def test_liquid_enthalpy_is_continuous_at_tmin_and_vanishes_above_tc():
     assert np.all(hot.calVAP() == 0.0)
     gas = thermoFT.Thermo(['C6H14'], 600.0, np.array([1.0]), phase='Gas')
     assert hot.h == pytest.approx(gas.h)
+
+
+def test_rstoic_heat_duty_is_the_enthalpy_balance():
+    """RStoic used Q = n1*h1 - (n0*n0 + nH*nH) (flow squared); now flow times enthalpy."""
+    x = np.zeros(55)
+    x[[0, 2, 5, 6, 7, 8, 10]] = 0.3, 0.2, 0.2, 0.1, 0.1, 0.05, 0.05
+    r = reactorsFT.RStoic('r', mediaFT.Syncrude(), F0_n=1.0, F0_Xi=x)
+    assert r.run_sol().success
+    assert r.FH0.n == pytest.approx((0.1*1 + 0.1*2 + 0.05*3)/3)            # steam for C2-C4 -> CH4 + CO
+    assert r.Q == pytest.approx(r.F1.n*r.F1.h - r.F0.n*r.F0.h - r.FH0.n*r.FH0.h, abs=1e-12)
+    assert r.Q == pytest.approx(3.732064, rel=1e-5)                          # endothermic steam reforming
+    r.ExBs()
+    assert r.Exloss > 0 and 0 < r.Exeff < 1
