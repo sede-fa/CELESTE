@@ -360,9 +360,9 @@ class GPU_3S(comp.GPUbase):
         self.sep = sep
         
     def Eqs(self):
-        idx:npArray[np.int] = np.where(self.sep == -1)
-        sep1:npArray[np.float64] = np.where(self.sep >= 0, self.sep, 0)
-        self.F3.n = float(self.F0.n*self.F0.Xi[idx])
+        idx = np.flatnonzero(np.asarray(self.sep) == -1)
+        sep1:npArray[np.float64] = np.where(self.sep >= 0, self.sep, 0).astype(float)
+        self.F3.n = float(self.F0.n*self.F0.Xi[idx[0]])
         self.F1.n = np.sum(self.F0.n*self.F0.Xi*sep1)
         self.F1.Xi = self.F0.n*self.F0.Xi*sep1/self.F1.n
         self.F2.n = self.F0.n - self.F1.n - self.F3.n

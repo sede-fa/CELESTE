@@ -1,7 +1,8 @@
 import numpy as np
 from numpy.typing import NDArray as npArray
-import scipy.optimize as spo
 from . import ModelBase, interfaces, media
+from .. import solvers
+from .._deprecation import deprecated
 
 class GPUbase(ModelBase):
     def __init__(self, name, eff, args):
@@ -62,12 +63,6 @@ class GPU_1S(GPUbase):
     def Eqs(self)->None:
         self.F1.n = self.F0.n
         self.F1.Xi = self.F0.Xi  
-    
-    def MBcheck(self)->float:
-        # Mass balance
-        MB = self.F0.m - self.F1.m 
-        print(f"{abs((self.F0.m/(self.F1.m)) - 1)*100}% difference ")    
-        return MB
     
     @property
     def Wid(self):
@@ -155,11 +150,6 @@ class GPU_2S(GPUbase):
     def W(self):
         return float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
     
-    def MBcheck(self)->float:
-        # Mass balance
-        print(f"{abs((self.F0.m/(self.F1.m+self.F2.m)) - 1)*100}% difference ")    
-        return self.F0.m - (self.F1.m + self.F2.m)
-
     @property
     def Exloss(self):
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex
@@ -238,11 +228,6 @@ class GPU_2SV2(GPUbase):
 
         self.F1.T = self.F0.T
         self.F2.T = self.F0.T 
-        
-    def MBcheck(self)->float:
-        # Mass balance
-        print(f"{abs((self.F0.m/(self.F1.m+self.F2.m)) - 1)*100}% difference ")    
-        return self.F0.m - (self.F1.m + self.F2.m)
         
     @property
     def Wid(self):
@@ -339,18 +324,16 @@ class GPU_3S(GPUbase):
         self.sep = sep
         
     def Eqs(self):
-        idx:npArray[np.int] = np.where(self.sep == -1)
-        sep1:npArray[np.float64] = np.where(self.sep >= 0, self.sep, 0)
-        self.F3.n = float(self.F0.n*self.F0.Xi[idx])
+        sep = np.asarray(self.sep, dtype=float)
+        idx = np.flatnonzero(sep == -1)
+        if idx.size != 1:
+            raise ValueError(f"{self.name}: 'sep' must mark exactly one component with -1 (the one sent to F3), got {sep}")
+        sep1 = np.where(sep >= 0, sep, 0)
+        self.F3.n = float(self.F0.n*self.F0.Xi[idx[0]])
         self.F1.n = np.sum(self.F0.n*self.F0.Xi*sep1)
         self.F1.Xi = self.F0.n*self.F0.Xi*sep1/self.F1.n
         self.F2.n = self.F0.n - self.F1.n - self.F3.n
         self.F2.Xi = (self.F0.n*self.F0.Xi - (self.F1.n*self.F1.Xi + self.F3.n*self.F3.Xi))/self.F2.n     
-    
-    def MBcheck(self)->float:
-        # Mass balance
-        print(f"{abs((self.F0.m/(self.F1.m + self.F2.m + self.F3.m)) - 1)*100}% difference ")    
-        return self.F0.m-(self.F1.m + self.F2.m + self.F3.m)
     
     @property
     def Wid(self):
@@ -475,11 +458,6 @@ class CompIsot(Compressor):
     def Sgen(self):
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F0.T
     
-    def MBcheck(self)->float:
-        # Mass balance
-        print(f"{abs((self.F0.m/self.F1.m) - 1)*100}% difference ")    
-        return self.F0.m - self.F1.m
-        
     def run_sol(self):
         return self.Eqs()
  
@@ -564,22 +542,14 @@ class CompIsent(Compressor):
     def Sgen(self):
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n
     
-    def MBcheck(self)->float:
-        # Mass balance
-        print(f"{abs((self.F0.m / self.F1.m ) - 1)*100}% difference ")    
-        return self.F0.m - self.F1.m
-
     def f_sol(self, x):
         self.F1.T = x[0]
         return self.Eqs()
         
     def run_sol(self):
-        x0 = self.F0.T*(self.F1.P/self.F0.P)**(self.R/1.3)
-        sol = spo.root(self.f_sol, x0)
-        self.f_sol(sol.x)
-        if not sol.success:
-            print(f'{self.name} Failed')
-        return sol  
+        # ideal-gas isentropic estimate with the inlet heat capacity as initial guess
+        x0 = self.F0.T*(self.F1.P/self.F0.P)**(self.R/self.F0.cp)
+        return solvers.solve(self.f_sol, [x0], bounds=([1.0], [1e4]), name=self.name)
 
 class ASU(ModelBase):
     """
@@ -627,6 +597,7 @@ class ASU(ModelBase):
 
     def Eqs(self):
         self.F1.T = self.F0.T
+        self.F2.T = self.F0.T
         self.F2.P = self.F1.P
         self.F1.n = self.F0.n*self.F0.Xi[1] 
         self.F2.n = self.F0.n - self.F1.n 
@@ -638,10 +609,9 @@ class ASU(ModelBase):
     def Q(self):
         return -self.W
         
+    @deprecated('use MBcheck()')
     def MBCheck(self):
-        MB:float = self.F0.m - (self.F1.m + self.F2.m)
-        print(f"{abs((self.F0.m/(self.F1.m+self.F2.m)) - 1)*100}% difference ")
-        return MB
+        return self.MBcheck()
 
     @property
     def Exth(self):
@@ -747,9 +717,7 @@ class Pump(ModelBase):
         return self.Eqs()
         
     def run_sol(self):
-        x0 = self.F0.T
-        sol = spo.root(self.f_sol, x0)
-        return sol
+        return solvers.solve(self.f_sol, [self.F0.T], bounds=([1.0], [1e4]), name=self.name)
             
 class Valve(ModelBase):
     """
@@ -829,7 +797,8 @@ class DAC(ModelBase):
         self.F2 = interfaces.Flange(name + '.F2', Medium=Medium, n=n, Xi=Xi, T=T, P=F1_P) #CO2
 
     def Eqs(self):
-        self.F0.T = self.F1.T
+        self.F1.T = self.F0.T
+        self.F2.T = self.F0.T
         self.F2.P = self.F1.P
         self.F2.n = self.F0.n*self.F0.Xi[2] 
         self.F1.n = self.F0.n - self.F2.n 
@@ -844,10 +813,9 @@ class DAC(ModelBase):
     def Q(self):
         return self.Power_th*self.F2.m*3600*1e-6
         
+    @deprecated('use MBcheck()')
     def MBCheck(self):
-        MB:float = self.F0.m - (self.F1.m + self.F2.m)
-        print(f"{abs((self.F0.m/(self.F1.m+self.F2.m)) - 1)*100}% difference ")
-        return MB
+        return self.MBcheck()
 
     @property
     def Exth(self):

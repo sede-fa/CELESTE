@@ -23,7 +23,14 @@ class ReportingMixin:
                 'MW': v.F0.mw,
                 'Exth': v.Exth
             }
-        return pd.DataFrame(heat_tab).transpose().sort_values('Q')
+        return self._table(heat_tab, ['CP', 'T0', 'T1', 'deltaT', 'Q', 'm', 'cp', 'MW', 'Exth']).sort_values('Q')
+
+    @staticmethod
+    def _table(records: dict, columns: list) -> pd.DataFrame:
+        """DataFrame with one row per record and float columns, also when there are no records."""
+        if not records:
+            return pd.DataFrame(columns=columns, dtype=float)
+        return pd.DataFrame(records).transpose().astype(float)
 
     def pinch_stream_table(self, exclude: list[str] | None = None, include: list[str] | None = None,
                             min_duty: float = 1.0, min_delta_t: float = 0.5) -> pd.DataFrame:
@@ -123,14 +130,12 @@ class ReportingMixin:
                 'Q': np.where(np.abs(v.Q) > 1e-7, v.Q, 0).round(5),
                 'Exth': np.where(np.abs(v.Exth) > 1e-7, v.Exth, 0).round(5)
             }
-        return pd.DataFrame(heat_tab).transpose().sort_values('Q')
+        return self._table(heat_tab, ['Q', 'Exth']).sort_values('Q')
 
     def work_df(self):
-        Ws = {}
-        for i, v in enumerate(self.r_get('')):
-            if hasattr(self.rgetattr(v), 'W'):
-                Ws[f'{self.name}.{v}'] = self.rgetattr(v).W
-        return pd.Series(Ws)
+        """Work of every component exposing ``W`` [kJ/s], as a Series named 'W'."""
+        Ws = {f'{self.name}.{i}': float(v.W) for i, v in self.get_Electric().items()}
+        return pd.Series(Ws, name='W', dtype=float)
 
     def flow_df(self):
         tab = {}
@@ -153,7 +158,7 @@ class ReportingMixin:
                 'lhv': v.F0.LHV,
                 'LHV': v.F0.n * v.F0.LHV
             }
-        return pd.DataFrame(tab).transpose()
+        return self._table(tab, ['n', 'm', 'ex', 'EX', 'lhv', 'LHV'])
 
     def exloss_df(self):
         loss = {}
@@ -161,7 +166,7 @@ class ReportingMixin:
             loss[i] = {
                 'Ex loss': np.where(np.abs(v.Exloss) > 1e-7, v.Exloss, 0).round(5)
             }
-        return pd.DataFrame(loss).transpose()
+        return self._table(loss, ['Ex loss'])
 
     def tot_LHV_Flow_out(self):
         return np.sum([v.F0.LHV * v.F0.n for i, v in self.get_Sinks().items()])
@@ -195,18 +200,18 @@ class ReportingMixin:
         return df[(df.Q < 0)].Q.sum()
 
     def tot_work_in(self):
-        df = self.work_df()
-        return df[(df.W > 0)].W.sum()
+        W = self.work_df()
+        return W[W > 0].sum()
 
     def tot_work_out(self):
-        df = self.work_df()
-        return df[(df.W < 0)].W.sum()
+        W = self.work_df()
+        return W[W < 0].sum()
 
     def tot_work_comp(self):
-        works = self.get_Electric()
+        """Total work of pumps and compressors [kJ/s]."""
         W = 0
-        for i, v in works.items():
-            if isinstance(self.rgetattr(i), (CSL.components.Pump, CSL.components.Compressor)) and ('valve' or 'Valve') not in i:
+        for i, v in self.get_Electric().items():
+            if isinstance(v, (CSL.components.Pump, CSL.components.Compressor)) and 'valve' not in i and 'Valve' not in i:
                 W += np.where(np.abs(v.W) > 1e-7, v.W, 0)
         return W
 
@@ -228,10 +233,7 @@ class ReportingMixin:
         return W
 
     def tot_Qloss(self):
-        qloss = {}
-        for i in self.r_get():
-            if isinstance(self.rgetattr(i), CSL.electrochem.SOC):
-                qloss = self.rgetattr(i).Qloss
-        return qloss
+        """Sum of the heat losses of all SOC stacks [kJ/s]."""
+        return sum(unit.Qloss for _, unit in self._units() if isinstance(unit, CSL.electrochem.SOC))
 
     

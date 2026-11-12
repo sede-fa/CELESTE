@@ -1,30 +1,53 @@
+"""
+Small reusable systems built from the component models.
+
+1. SimpleHeaterSys:     source -> heater -> sink
+2. SimpleCompressorSys: source -> isentropic compressor -> sink
+3. Ncomp:               N-stage compression with inter- and after-cooling (a reusable "box")
+"""
 from celeste.CSL import interfaces, media, heat, flow, components, SysBase
 
 class SimpleHeaterSys(SysBase):
+    """
+    Minimal system: an air stream is heated (or cooled) to ``T_out``.
+
+    Example:
+        sys = SimpleHeaterSys('sys', flow_in=1., Xi_in=None, T_in=300., P_in=1., T_out=500.)
+        sys.run_sol()
+        sys.heater.Q        # heat duty in kJ/s
+    """
     def __init__(self, name, flow_in, Xi_in, T_in, P_in, T_out):
-        self.__init__(locals())
+        super().__init__(locals())
         ## initialise components with fixed parameters
         self.source = flow.SourceM(name + '.source', media.Air(), flow_in, Xi_in, T_in, P_in)
-        self.heater = heat.Heater(name + '.heater', media.Air(), T_out)
+        self.heater = heat.Heater(name + '.heater', media.Air(), media.Air(), F1_T=T_out)
         self.sink = flow.Sink(name + '.sink', media.Air())
 
-    def run_sol(self):
-        self.connect_seq(self.source.F1, self.heater.F0) # feed Heater inlet flow
-        self.heater.run_sol() # run internal solver in heater model
-        self.connect_seq(self.heater.F1, self.sink.F0) # feed sink inlet flow
+    def seq_sol(self, store=False):
+        self.connect_seq(self.source.F1, self.heater.F0, store=store) # feed Heater inlet flow
+        self.heater._sol = self.heater.run_sol() # run internal solver in heater model
+        self.connect_seq(self.heater.F1, self.sink.F0, store=store) # feed sink inlet flow
 
 class SimpleCompressorSys(SysBase):
-    def __init__(self, name, flow_in, Xi_in, T_in, P_in, P_out):
-        self.__init__(locals())
+    """
+    Minimal system: an air stream is compressed isentropically (efficiency ``eff``) to ``P_out``.
+
+    Example:
+        sys = SimpleCompressorSys('sys', flow_in=1., Xi_in=None, T_in=300., P_in=1., P_out=5.)
+        sys.run_sol()
+        sys.compressor.W    # shaft work in kJ/s
+    """
+    def __init__(self, name, flow_in, Xi_in, T_in, P_in, P_out, eff=1.):
+        super().__init__(locals())
         ## initialise components with fixed parameters
         self.source = flow.SourceM(name + '.source', media.Air(), flow_in, Xi_in, T_in, P_in)
-        self.compressor = components.CompIsent(name + '.compressor', media.Air(), F1_P=P_out)
+        self.compressor = components.CompIsent(name + '.compressor', media.Air(), eff=eff, F1_P=P_out)
         self.sink = flow.Sink(name + '.sink', media.Air())
 
-    def run_sol(self):
-        self.connect_seq(self.source.F1, self.compressor.F0) # feed Compressor inlet flow
-        self.compressor.run_sol() # run internal solver in compressor model
-        self.connect_seq(self.compressor.F1, self.sink.F0) # feed sink inlet flow
+    def seq_sol(self, store=False):
+        self.connect_seq(self.source.F1, self.compressor.F0, store=store) # feed Compressor inlet flow
+        self.compressor._sol = self.compressor.run_sol() # run internal solver in compressor model
+        self.connect_seq(self.compressor.F1, self.sink.F0, store=store) # feed sink inlet flow
 
 class Ncomp(SysBase):
     '''
@@ -37,10 +60,11 @@ class Ncomp(SysBase):
 
     def __init__(self, name, Medium, n=1., Xi=None, T_in=400, P_in=1., N_stage=2, eff_comp=[0.7, 0.7], P_comp=[2., 3.], T_HT=[350., 350.]):  
         super().__init__(locals()) 
-        assert N_stage >= 2, "Minimum 2 compression stages required for valid configuration"
-        assert len(eff_comp) == N_stage, "eff_comp list length must match N_stage"
-        assert len(P_comp) == N_stage, "P_comp list length must match N_stage"
-        assert len(T_HT) == N_stage, "T_HT list length must match N_stage"
+        if N_stage < 2:
+            raise ValueError("Minimum 2 compression stages required for valid configuration")
+        for label, values in (('eff_comp', eff_comp), ('P_comp', P_comp), ('T_HT', T_HT)):
+            if len(values) != N_stage:
+                raise ValueError(f"{label} list length must match N_stage")
         self.N = N_stage
 
         self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=n, Xi=Xi, T=T_in, P=P_in)  
@@ -64,10 +88,10 @@ class Ncomp(SysBase):
         current_flow = self.F0
         for idx, (comp, heater) in enumerate(zip(self.compressors, self.heaters)):
             self.connect_seq(current_flow, comp.F0, store=store)
-            comp.run_sol()
+            comp._sol = comp.run_sol()
             
             self.connect_seq(comp.F1, heater.F0, store=store)
-            heater.run_sol()
+            heater._sol = heater.run_sol()
             
             current_flow = heater.F1
             if idx == self.N - 1:  # Final connection
@@ -91,11 +115,13 @@ class Ncomp(SysBase):
     def add_stage(self, eff, pressure, temp):
         """Dynamically add new compression stage"""
         self.N += 1
-        new_comp = components.CompIsent(f"comp{self.N}", Medium=self.Medium, eff=eff, F1_P=pressure)
-        new_heater = heat.Heater(f"HT{self.N}", Medium0=self.Medium, Medium1=self.Medium, F1_T=temp, F1_P=pressure)
+        new_comp = components.CompIsent(f"{self.name}.comp{self.N}", Medium=self.Medium, eff=eff, F1_P=pressure)
+        new_heater = heat.Heater(f"{self.name}.HT{self.N}", Medium0=self.Medium, Medium1=self.Medium, F1_T=temp, F1_P=pressure)
         
         self.compressors.append(new_comp)
         self.heaters.append(new_heater)
+        setattr(self, f"comp{self.N}", new_comp)
+        setattr(self, f"HT{self.N}", new_heater)
     
     def run_sol(self):
         self.seq_sol()

@@ -11,9 +11,13 @@ class GraphMixin:
         """
         self.create_graph("mermaid")
 
-    def make_mermaid_graph(self) -> str:
+    def make_mermaid_graph(self, save: bool | str = True) -> str:
         """
         Create a Mermaid graph representation of the system.
+
+        Args:
+            save: ``True`` writes ``<system name>.mmd`` into the working directory (default),
+                  a string is used as the file path, ``False`` writes nothing.
 
         Returns:
             str: Mermaid syntax for the graph.
@@ -24,12 +28,15 @@ class GraphMixin:
             if obj != self:
                 mermaid_lines.append(f"{obj.name}\n")
 
-        with open(f'{self.name}.mmd', 'w') as f:
-            for connection in self.connections:
-                mermaid_lines.append(f"\t{connection[0]} --{connection[1]}_{connection[2]}--> {connection[3]}\n")
-            f.write("".join(mermaid_lines))
+        for connection in self.connections:
+            mermaid_lines.append(f"\t{connection[0]} --{connection[1]}_{connection[2]}--> {connection[3]}\n")
 
-        return "".join(mermaid_lines)
+        text = "".join(mermaid_lines)
+        if save:
+            path = save if isinstance(save, str) else f'{self.name}.mmd'
+            with open(path, 'w') as f:
+                f.write(text)
+        return text
 
     def make_networkx_graph(self) -> nx.DiGraph:
         """
@@ -55,13 +62,15 @@ class GraphMixin:
         nx.draw_networkx(G, pos)
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
         plt.show()
+        return G
 
-    def create_graph(self, graph_type: str = "mermaid") -> nx.DiGraph | str:
+    def create_graph(self, graph_type: str = "mermaid", save: bool | str = True) -> nx.DiGraph | str:
         """
         Create a graph representation of the system based on the specified type.
 
         Args:
             graph_type (str): The type of graph to create ("networkx" or "mermaid").
+            save: for "mermaid": write the graph to ``<system name>.mmd`` (True), to a given path (str) or not at all (False).
 
         Returns:
             Union[nx.DiGraph, str]: The generated graph (NetworkX object or Mermaid syntax).
@@ -74,6 +83,6 @@ class GraphMixin:
         if graph_type.lower() == "networkx":
             return self.make_networkx_graph()
         elif graph_type.lower() == "mermaid":
-            return self.make_mermaid_graph()
+            return self.make_mermaid_graph(save=save)
         else:
             raise ValueError(f"Unsupported graph type: {graph_type}. Choose 'networkx' or 'mermaid'.")

@@ -1,13 +1,15 @@
 """
 Reactors models
 
-1) EquilBase: Base model for isothermal equilibirum reactors
-2) MR: Methanation/RWGS
-3) HB: Haber Bosch
-4) MeOH_Equil
-...
-
-
+1) EquilBase:     Base model for isothermal reactors (ports F0 -> F1, shared exergy / entropy balances)
+2) MR:            Methanation / steam reforming + water-gas shift at equilibrium
+3) HB:            Haber-Bosch, isothermal, kinetic
+4) HB_Adiabatic:  Haber-Bosch, adiabatic, kinetic
+5) MeOH_Equil:    Methanol synthesis at equilibrium
+6) MeOH_Yield:    Methanol synthesis with a given yield, rWGS at equilibrium
+7) MeOH_Kinetic:  Methanol synthesis, kinetic (Van den Bussche & Froment)
+8) MeOH_WGS:      Adiabatic methanol synthesis with a given yield, WGS at equilibrium
+9) Reformer:      Kinetic propane / methane steam reformer (CSTR), Reformer_1D: series of them
 """
 
 import numpy as np
@@ -15,11 +17,24 @@ from numpy.typing import NDArray as npArray
 import scipy.optimize as spo
 
 from . import ModelBase, SysBase, interfaces, media
+from . import equilibrium as eq
+from .. import solvers
+from .._deprecation import deprecated
 
 
 class EquilBase(ModelBase):
     """
-    
+    Base for isothermal, isobaric reactors with one inlet (F0) and one outlet (F1).
+
+    Setting ``T`` or ``P`` on the reactor sets both flanges. Sub-classes provide
+    ``Eqs()`` (residuals; also stores the heat duty ``Q`` in kJ/s) and ``f_sol(x)``
+    which maps the unknown vector ``x = [F1.n, *F1.Xi]`` onto the model.
+
+    Properties:
+        Exth:   exergy of the heat duty at the reactor temperature [kJ/s]
+        Exloss: exergy destroyed [kJ/s]
+        Exeff:  exergy efficiency [-]
+        Sgen:   entropy generated [kJ/K/s]
     """
 
     def __init__(self, name:str, Medium:media.Medium_Base, 
@@ -56,7 +71,35 @@ class EquilBase(ModelBase):
         self.F1.T = T_   
 
     def Z(self):
-        return ((1000/self.F1.T)-1)    
+        return ((1000/self.F1.T)-1)
+
+    @property
+    def Exth(self):
+        return self.Q*(1 - (298.15/self.F1.T))
+
+    @property
+    def Exloss(self):
+        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
+
+    @property
+    def Exeff(self):
+        return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
+
+    @property
+    def Sgen(self):
+        return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F0.T
+
+    @deprecated('Exth, Exloss and Exeff are properties now and need no update call', removal=None)
+    def ExBs(self) -> None:
+        return None
+
+    def _solve_composition(self, f_sol, x0, n_scale=None):
+        """Solve for x = [F1.n, *F1.Xi] with physical bounds (n > 0, 0 <= Xi <= 1)."""
+        x0 = np.asarray(x0, dtype=float)
+        scale = self.F0.n if n_scale is None else n_scale
+        lower = np.concatenate(([1e-12*scale], np.zeros(x0.size - 1)))
+        upper = np.concatenate(([np.inf], np.ones(x0.size - 1)))
+        return solvers.solve(f_sol, x0, bounds=(lower, upper), scale=scale, name=self.name)
 
 class MR(EquilBase):
     """ 
@@ -96,41 +139,24 @@ class MR(EquilBase):
         return self.Eq
     
     def K_WGS(self):
-        #return (np.exp((-0.2935*self.Z()**3) + (0.6351*self.Z()**2) + (4.1788*self.Z()) + 0.3169))
-        return np.exp(- (32.1153*(self.F1.T) - 3.5211e4)/(8.314*self.F1.T)) 
-    
-    def K_MSR(self):
-        #return (1.0267*np.exp((-0.2513*self.Z()**4) + (0.3665*self.Z()**3) + (0.581*self.Z()**2) - 27.134*self.Z() + 3.277))
-        return np.exp(-(225215.699 -252.643*self.F1.T)/(8.314*self.F1.T)) 
-    
-    def MBcheck(self)->float:
-        # Mass balance
-        MB:float = self.F0.m - self.F1.m 
-        print(f"{abs((self.F0.m/(self.F1.m)) - 1)*100}% difference ")    
-        return MB
-    
-    @property
-    def Exth(self):
-        return self.Q*(1 - (298.15/self.F1.T))
+        return eq.K_WGS(self.F1.T)
 
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
-    
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F0.T
-        
+    def K_MSR(self):
+        return eq.K_MSR(self.F1.T)
+
     def f_sol(self, x):  
         self.F1.n = x[0]
         self.F1.Xi = x[1:7] 
         return self.Eqs()
         
-    def run_sol(self, method=spo.least_squares):  
+    def run_sol(self, method=None):
+        """Solve for the outlet. ``method`` may be a scipy-style solver ``method(fun, x0)`` to bypass the default."""
         x0 = np.concatenate(([self.F0.n], self.F0.Xi)) 
-        sol = method(self.f_sol, x0)
-        self.f_sol(sol.x)
-        return sol
+        if method is not None:
+            sol = method(self.f_sol, x0)
+            self.f_sol(sol.x)
+            return sol
+        return self._solve_composition(self.f_sol, x0)
 
 class HB(EquilBase):
     """
@@ -230,28 +256,18 @@ class HB(EquilBase):
         print(f"{abs((self.F0.m/(self.F1.m)) - 1)*100}% difference ")    
         return MB
         
-    @property
-    def Exth(self):
-        return self.Q*(1 - (298.15/self.F1.T))
-
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
-    
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F0.T
-        
-    def for_sol(self, x):
+    def f_sol(self, x):
         self.F1.n = x[0]
         self.F1.Xi = x[1:4]
-        return self.Eqs()    
-    
+        return self.Eqs()
+
+    for_sol = f_sol   # former name, kept for existing code
+
     def run_sol(self):
         x0 = np.concatenate(([self.F0.n], self.F0.Xi))
-        sol = spo.least_squares(self.for_sol, x0) 
-        self.for_sol(sol.x)
-        return sol
+        lower = np.array([1e-12*self.F0.n, 1e-9, 1e-9, 1e-9])   # the rate expressions divide by the fractions
+        upper = np.array([np.inf, 1.0, 1.0, 1.0])
+        return solvers.solve(self.f_sol, x0, bounds=(lower, upper), scale=self.F0.n, name=self.name)
 
 class HB_Adiabatic(ModelBase):
     """
@@ -366,20 +382,17 @@ class HB_Adiabatic(ModelBase):
     def conversion(self):
         return (self.F0.Xi[0]*self.F0.n - self.F1.Xi[0]*self.F1.n)/(self.F0.Xi[0]*self.F0.n)
         
-    def for_sol(self, x):
+    def f_sol(self, x):
         self.F1.n = np.abs(x[0])
         self.F1.Xi = np.abs(x[1:4])
         self.F1.T = np.abs(x[4])
-        return self.Eqs()    
-    
+        return self.Eqs()
+
+    for_sol = f_sol   # former name, kept for existing code
+
     def run_sol(self):
         x0=np.concatenate(([self.F0.n*0.75], np.array([0.57, 0.16, 0.27]), [self.F0.T*1.2])) # maybe make this more flexible 
-        sol = spo.root(self.for_sol, x0, method='hybr') 
-        self.for_sol(sol.x)
-        if not sol.success:
-            print(f'{self.name} Failed')
-
-        return sol
+        return solvers.solve(self.f_sol, x0, scale=self.F0.n, name=self.name)
 
 class MeOH_Equil(EquilBase):
     """
@@ -464,25 +477,18 @@ class MeOH_Equil(EquilBase):
         return self.Eq
     
     def K_rWGS(self):
-        return 10**((-2073/self.F1.T) + 2.029)
-    
+        return eq.K_rWGS_Graaf(self.F1.T)
+
     def K_MeOH(self):
-        return 10**((3066/self.F1.T) - 10.592) # for CO2
-        #return 10**((5139/self.F1.T) - 12.621) # for CO 
-    
+        return eq.K_MeOH_CO2_Graaf(self.F1.T) # for CO2
+
     def MBcheck(self)->float:
+        """Print the relative mass balance error and return out - in, g/s."""
         self.m0:float = self.F0.n*self.F0.mw
         self.m1:float = self.F1.n*self.F1.mw
         MB:float = self.m1 - self.m0
         print(f"{(self.F1.n*self.F1.mw/(self.F0.n*self.F0.mw) - 1)*100}% difference")
         return MB
-    
-    def ExBs(self)->None:
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.Exth:float = self.Q*(1 - (298.15/self.F1.T))
-        self.Exloss:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
-        self.Exeff:float = 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
     
     def f_sol(self, x):
         self.F1.n = x[0]
@@ -490,10 +496,8 @@ class MeOH_Equil(EquilBase):
         return self.Eqs()
         
     def run_sol(self):
-        x0 = np.concatenate(([self.F0.n], media.Fuel_MeOH()._reference_X )) 
-        sol = spo.least_squares(self.f_sol, x0)
-        self.f_sol(sol.x)
-        return sol
+        x0 = np.concatenate(([self.F0.n], media.Fuel_MeOH._default_Xi))
+        return self._solve_composition(self.f_sol, x0)
 
 class MeOH_Yield(EquilBase):
     """
@@ -579,30 +583,18 @@ class MeOH_Yield(EquilBase):
         return self.Eq
     
     def K_rWGS(self):
-        return 10**((-2073/self.T) + 2.029)
-    
-    def MBcheck(self)->float:
-        self.m0:float = self.F0.n*self.F0.mw
-        self.m1:float = self.F1.n*self.F1.mw
-        MB:float = self.m1 - self.m0
-        print(f"{(self.F1.n*self.F1.mw/(self.F0.n*self.F0.mw) - 1)*100}% difference")
-        return MB
-    
-    def ExBs(self)->None:
-        self.Exth:float = self.Q*(1 - (298.15/self.F1.T))
-        self.Exloss:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
-        self.Exeff:float = 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
-    
+        return eq.K_rWGS_Graaf(self.T)
+
+    MBcheck = MeOH_Equil.MBcheck
+
     def f_sol(self, x): 
         self.F1.n = x[0]
         self.F1.Xi = x[1:8]
         return self.Eqs()
         
     def run_sol(self):
-        x0 = np.concatenate(([self.F0.n], media.Fuel_MeOH()._reference_X )) 
-        sol = spo.least_squares(self.f_sol, x0)
-        self.f_sol(sol.x)
-        return sol
+        x0 = np.concatenate(([self.F0.n], media.Fuel_MeOH._default_Xi))
+        return self._solve_composition(self.f_sol, x0)
 
 class MeOH_Kinetic(EquilBase):
     """
@@ -663,10 +655,17 @@ class MeOH_Kinetic(EquilBase):
 
         self.F1.P = self.F0.P
         self.F1.T = self.F0.T   
-        # adsorption constants
-        self._K_a = 3453.38
-        self._K_b = 0.499*np.exp(17197/(self.R*self.F1.T)) 
-        self._K_c = 6.62e-11*np.exp(124119/(self.R*self.F1.T))
+
+    # adsorption constants (evaluated at the current reactor temperature)
+    _K_a = 3453.38
+
+    @property
+    def _K_b(self):
+        return 0.499*np.exp(17197/(self.R*self.F1.T))
+
+    @property
+    def _K_c(self):
+        return 6.62e-11*np.exp(124119/(self.R*self.F1.T))
 
     def Eqs(self): 
         rrWGS = self.r_rWGS()   
@@ -710,17 +709,7 @@ class MeOH_Kinetic(EquilBase):
         r_den = (1 + self._K_a*(self.F1.Xi[4]/self.F1.Xi[0]) + self._K_b*(self.F1.Xi[0]*self.F1.P)**0.5 + self._K_c*self.F1.Xi[4]*self.F1.P) 
         return r_num/r_den 
 
-    def MBcheck(self)->float:
-        self.m0:float = self.F0.n*self.F0.mw
-        self.m1:float = self.F1.n*self.F1.mw
-        MB:float = self.m1 - self.m0
-        print(f"{(self.F1.n*self.F1.mw/(self.F0.n*self.F0.mw) - 1)*100}% difference")
-        return MB
-    
-    def ExBs(self)->None:
-        self.Exth:float = self.Q*(1 - (298.15/self.F1.T))
-        self.Exloss:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
-        self.Exeff:float = 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
+    MBcheck = MeOH_Equil.MBcheck
 
     def f_sol(self, x): 
         self.F1.n = x[0]
@@ -729,9 +718,10 @@ class MeOH_Kinetic(EquilBase):
         
     def run_sol(self, guess_x0=np.array([0.709,0.048,0.074,0.031,0.023,0.051, 0.064])):
         x0 = np.concatenate(([self.F0.n*0.9], guess_x0)) 
-        sol = spo.least_squares(self.f_sol, x0)
-        self.f_sol(sol.x)
-        return sol
+        # the rate expressions divide by x_H2 and x_CO2: keep the iterates strictly positive
+        lower = np.concatenate(([1e-12*self.F0.n], np.full(7, 1e-12)))
+        upper = np.concatenate(([np.inf], np.ones(7)))
+        return solvers.solve(self.f_sol, x0, bounds=(lower, upper), scale=self.F0.n, name=self.name)
 
 #WGS kinetics
 class MeOH_WGS(EquilBase):
@@ -820,8 +810,7 @@ class MeOH_WGS(EquilBase):
         return self.F0.n*self.F0.h - self.F1.n*self.F1.h 
     
     def K_WGS(self):
-        K_WGS = np.exp(- (32.1153*(self.F1.T) - 3.5211e4)/(8.314*self.F1.T))
-        return K_WGS
+        return eq.K_WGS(self.F1.T)
         
     def MBcheck(self)->float:
         MB = self.F1.m - self.F0.m
@@ -854,10 +843,10 @@ class MeOH_WGS(EquilBase):
         return self.Eqs()
         
     def run_sol(self):
-        x0 = np.concatenate(([self.F0.n*0.9], np.array([0.69, 0.003, 0.17, 0.09, 0.027, 1e-10, 0.02 ]) , [self.F0.T*1.05])) #self.F0.Xi np.array([0.68, 0, 0.18, 0.046, 0.054,0, 0.04 ]), np.array([0.69, 0.003, 0.17, 0.09, 0.027, 0, 0.02 ]), np.array([0.7, 0.003 , 0.16 , 0.09 , 0.027, 0., 0.02]) media.Fuel_MeOH()._reference_X
-        sol = spo.least_squares(self.f_sol, x0)
-        self.f_sol(sol.x)
-        return sol
+        x0 = np.concatenate(([self.F0.n*0.9], np.array([0.69, 0.003, 0.17, 0.09, 0.027, 1e-10, 0.02 ]) , [self.F0.T*1.05]))
+        lower = np.concatenate(([1e-12*self.F0.n], np.zeros(7), [200.0]))
+        upper = np.concatenate(([np.inf], np.ones(7), [3000.0]))
+        return solvers.solve(self.f_sol, x0, bounds=(lower, upper), scale=self.F0.n, name=self.name)
 
 class Reformer(ModelBase):
     '''
@@ -928,10 +917,10 @@ class Reformer(ModelBase):
         x0 = np.concatenate(([self.F0.n, self.F0.T], self.F0.Xi))
         
         sol = f_method(self.f_sol, x0, method='krylov', tol=1e-10)
-        #sol = spo.least_squares(self.f_sol, x0, ftol=1e-12, xtol=1e-12, gtol=1e-16)
         self.f_sol(sol.x)
         if not sol.success:
-            print(sol.success)
+            import warnings
+            warnings.warn(f'{self.name}: not converged ({sol.message})', solvers.ConvergenceWarning, stacklevel=2)
         return sol
 
 class Reformer_1D(SysBase):

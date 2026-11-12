@@ -3,22 +3,58 @@ Electrochemical reactors
 '''
 
 from . import interfaces, ModelBase
+from . import equilibrium as eq
+from .. import solvers
 import numpy as np
 import scipy.optimize as spo
 from celeste import functions as funs
 
+F_CONST = 96485  #: Faraday constant used by the electrochemical models, C/mol
+
 
 class SOC(ModelBase):
     '''
-    
+    Solid oxide cell stack (electrolysis for I < 0, fuel cell for I > 0) with the
+    fuel side at water-gas-shift and methane-reforming equilibrium.
+
+    Parameters:
+        name:      objects name
+        MediumF:   fuel side medium, species order of media.Fuel_CH4() (H2, CH4, CO2, CO, H2O, N2)
+        MediumA:   air side medium, media.Air() (O2, N2)
+        Tsoc0:     inlet temperature in [K] (alias: T_soc0)
+        Tsoc1:     outlet temperature in [K] (alias: T_soc1)
+        P_soc:     optional operating pressure in [bar]; by default the fuel inlet pressure is used
+        I:         current per cell in [A]; negative in electrolysis mode
+        cellArea:  active cell area in [cm2]
+        Ncells:    number of cells
+        f_ASR:     multiplier on the area specific resistance correlation
+        extent:    subtract the Gibbs energy of the internal reforming reaction from the ideal work
+        Qloss:     heat loss in [kJ/s]
+
+    Ports: F0 -> F1 (fuel side), A0 -> A1 (air side)
+
+    Properties:
+        Vid, Vop:  reversible and operating cell voltage [V]
+        j:         current density [A/cm2]
+        W:         electrical power into the stack [kJ/s]
+        Q:         heat into the stack [kJ/s]
+        RC:        reactant conversion [-]
     '''
     def __init__(self, name, MediumF, MediumA, Tsoc0:float=1073.15, Tsoc1:float=1073.15, I:float=0.0, cellArea:float=100., Ncells:int|float=1,
-                 f_ASR:float=1., extent:bool=False, Qloss:float=0.0 ): 
-        super().__init__(locals())
-        self.F0 = interfaces.Flange(name + '.F0', Medium=MediumF, T=Tsoc0)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=MediumF, T=Tsoc1)
-        self.A0 = interfaces.Flange(name + '.A0', Medium=MediumA, T=Tsoc0)
-        self.A1 = interfaces.Flange(name + '.A1', Medium=MediumA, T=Tsoc1)
+                 f_ASR:float=1., extent:bool=False, Qloss:float=0.0, *, T_soc0:float|None=None, T_soc1:float|None=None,
+                 P_soc:float|None=None):
+        # T_soc0 / T_soc1 are accepted as alternative spellings of Tsoc0 / Tsoc1
+        Tsoc0 = Tsoc0 if T_soc0 is None else T_soc0
+        Tsoc1 = Tsoc1 if T_soc1 is None else T_soc1
+        args = dict(locals())
+        for key in ('T_soc0', 'T_soc1', 'P_soc'):
+            args.pop(key)
+        super().__init__(args)
+        P0 = 1. if P_soc is None else P_soc
+        self.F0 = interfaces.Flange(name + '.F0', Medium=MediumF, T=Tsoc0, P=P0)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=MediumF, T=Tsoc1, P=P0)
+        self.A0 = interfaces.Flange(name + '.A0', Medium=MediumA, T=Tsoc0, P=P0)
+        self.A1 = interfaces.Flange(name + '.A1', Medium=MediumA, T=Tsoc1, P=P0)
 
         self._N_H = np.array([2,4,0,0,2,0])
         self._N_C = np.array([0,1,1,1,0,0])
@@ -60,14 +96,9 @@ class SOC(ModelBase):
         self.A1.Xi = np.array([Xi_O2_out, 1-Xi_O2_out], dtype=float)
         return self.Eq
     
-    def MBcheck(self):
-        MB = self.F0.m + self.A0.m - self.F1.m- self.A1.m
-        print(f'{abs(((self.F0.m + self.A0.m)/(self.F1.m + self.A1.m) -1))*100 }% difference')
-        return MB
-    
     @property
     def n_O(self):
-        return (self.Ncells*self.I/2/96485)
+        return (self.Ncells*self.I/2/F_CONST)
 
     @property
     def Wchem(self):
@@ -131,10 +162,10 @@ class SOC(ModelBase):
                 self.F0.n*(self.F0.Xi[2] + self.F0.Xi[4]))
     
     def K_WGS(self):
-        return np.exp(-(32.1153*(self.F1.T) - 3.5211e4)/(8.314*self.F1.T)) 
-    
+        return eq.K_WGS(self.F1.T)
+
     def K_MSR(self):
-        return np.exp(-(225215.699 - 252.643*self.F1.T)/(8.314*self.F1.T))       
+        return eq.K_MSR(self.F1.T)
     
     def ASR(self):
         # M. Riedel 2020 DOI 10.1149/1945-7111/ab6820
@@ -172,8 +203,12 @@ class SOC(ModelBase):
         if np.linalg.norm(sol.fun)>1e-7:
             sol = spo.root(self.f_sol, x0)
         res = self.f_sol(sol.x)
-        if not sol.success:
-            print(f'{self.name} Failed')
+        sol.residual_norm = float(np.max(np.abs(res)))
+        if not sol.success or sol.residual_norm > 1e-6*max(1.0, self.F0.n):
+            sol.success = False
+            import warnings
+            warnings.warn(f'{self.name}: not converged (max |residual| = {sol.residual_norm:.3e})',
+                          solvers.ConvergenceWarning, stacklevel=2)
         return sol  
 
     @property
@@ -190,7 +225,16 @@ class AEL(ModelBase):
     '''
     Alkaline electrolyser model
     It determines the current density [A/cm2] (j) and outlet mole flow and composition for a given mole flow of water
-    
+
+    Parameters:
+        name:   objects name
+        Medium: media.Media_AEL() (H2O(L), H2, O2, H2O)
+        T, P:   operating temperature [K] and pressure [bar]
+        j:      initial guess of the current density [A/cm2], negative for electrolysis
+        Ncells: number of cells
+        A:      active cell area [cm2]
+
+    Ports: F0 (water in) -> F1 (hydrogen side out), F2 (oxygen out)
     '''
     def __init__(self, name, Medium, T=298.15, P=1, j=-0.32, Ncells=None, A=None,
                  F0_n=1, F0_Xi=np.array([1, 0, 0, 0]), 
@@ -215,7 +259,7 @@ class AEL(ModelBase):
             [self.F0.Xi[1], self.F2.Xi[1], self.F1.Xi[1], -1], # H2
             [self.F0.Xi[2], self.F2.Xi[2], self.F1.Xi[2], -0.5])) # O2
         
-        n = np.array([self.F0.n, - self.F2.n, -self.F1.n, self.Ncells*self.I/2/96485])
+        n = np.array([self.F0.n, - self.F2.n, -self.F1.n, self.Ncells*self.I/2/F_CONST])
 
         self.Eq = np.concatenate((
             [
@@ -261,10 +305,6 @@ class AEL(ModelBase):
     def Exloss(self):
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth + self.W
     
-    def MBcheck(self):
-        print(f'{abs((self.F0.m/(self.F1.m + self.F2.m) -1))*100 }% difference')
-        return self.F0.m - (self.F1.m + self.F2.m)
-
     @property
     def Exeff(self):
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.max([0, self.Exth]) +  self.W)
@@ -278,5 +318,4 @@ class AEL(ModelBase):
         
     def run_sol(self):
         x0 = np.array([self.j,self.F0.n,0.997,self.F0.n])  
-        sol = spo.least_squares(self.f_sol, x0)
-        return sol
+        return solvers.solve(self.f_sol, x0, scale=self.F0.n, name=self.name)

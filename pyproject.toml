@@ -9,11 +9,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "numpy",
-  "scipy",
+  "scipy>=1.9",
   "pandas",
   "openpyxl",
   "coolprop",
-  "numba",
+  "jax",
+  "equinox",
   "networkx",
   "matplotlib"
 ]
@@ -26,12 +27,32 @@ classifiers = [
 dynamic = ["version"]
 urls = { homepage = "https://github.com/DLR-TT-ESI-EHT/CELESTE" }
 
+[project.optional-dependencies]
+# carbon deposition check with a full chemical equilibrium (celeste.functions.carbonFraction, Flange.getCarbon)
+cantera = ["cantera"]
+# rendering of Mermaid graphs inside notebooks (celeste.functions.mm)
+notebook = ["ipython"]
+# running the test suite
+test = ["pytest"]
+dev = ["pytest", "cantera", "ipython"]
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["celeste"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+  "error::celeste.solvers.ConvergenceWarning",
+]
 
 [tool.hatch.metadata]
 allow-direct-references=true

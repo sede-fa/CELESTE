@@ -1,8 +1,10 @@
+from functools import lru_cache
+
 import numpy as np
 import pandas as pd
-import numba as nb
 
 from ..CSL import thermo as th
+from ..jx import nasa as _nasa
 
 try:
     from importlib.resources import files
@@ -14,28 +16,24 @@ except ImportError:
 2. ThermoExergy: calculation of the stream exergy considering the physical and chemical exergy of the stream
 '''
 
-@nb.njit
 def _VapCalc(T, Tmin, Tmax, B, Tc, n, cpl):
     '''
-    need to test
+    Enthalpy and entropy of vaporisation of the hydrocarbons, shape (2, N).
+
+    T > Tmax          : 0
+    Tmin <= T <= Tmax : B*(1 - T/Tc)*n
+    T < Tmin          : B*(1 - Tmin/Tc)**n + cpl*(T - Tmin)
+
+    NOTE: the in-range branch multiplies by ``n`` whereas the documented Watson
+    correlation (see ``Thermo.calVAP``) and the branch below ``Tmin`` raise to
+    the power ``n``. The original behaviour is kept unchanged here; see
+    docs/known_issues.md before relying on liquid-phase hydrocarbon enthalpies.
     '''
+    with np.errstate(invalid='ignore'):
+        below = B*(1 - Tmin/Tc)**n + cpl*(T - Tmin)
+    hvap = np.where(T > Tmax, 0.0, np.where(T >= Tmin, B*(1 - T/Tc)*n, below))
+    return np.stack((hvap, hvap/T))
 
-    N = len(Tmin)
-    Vap = np.empty((2,N))
-
-    for i in range(N):
-        if T>Tmax[i]:
-            Vap[0,i] = 0
-        elif np.logical_and(T>=Tmin[i], T<=Tmax[i]):
-            Vap[0,i] = B[i]*(1-T/Tc[i])*n[i]
-        elif T<Tmin[i]:
-            Vap[0,i] = B[i]*(1-Tmin[i]/Tc[i])**n[i] + cpl[i]*(T-Tmin[i])
-
-        Vap[1,i] = Vap[0,i]/T
-
-    return Vap
-
-@nb.njit
 def _phaseVap(phaseID, T, Tmin, Tmax, B, Tc, n, cpl, NHC):
     if phaseID == 1:
         VAP = _VapCalc(T, Tmin, Tmax, B, Tc, n, cpl)
@@ -43,102 +41,118 @@ def _phaseVap(phaseID, T, Tmin, Tmax, B, Tc, n, cpl, NHC):
         VAP = np.zeros((2, NHC))
     return VAP
 
-@nb.njit
 def _mtCalcStatic(m, c, thermArr, CNumberi):
-    therm_sep = np.empty((3,len(CNumberi)))
-    for i in range(3):
-        for l in range(len(CNumberi)):
-            therm = 0
-            for j in range(5):
-                therm += m[i,j]*thermArr[j]*CNumberi[l] + c[i,j]*thermArr[j]
-            therm_sep[i,l] = therm
-    return therm_sep
+    '''[cp, h, s] of the hydrocarbons as linear functions of the carbon number, shape (3, N)'''
+    return np.outer(m @ thermArr, CNumberi) + (c @ thermArr)[:, None]
 
-@nb.njit
 def _thermoArrStat(t):
-    return np.array([t*t*t*t, t*t*t, t*t, t, 1.]) 
+    return np.array([t*t*t*t, t*t*t, t*t, t, 1.])
 
-class Thermo:  
+@lru_cache(maxsize=1)
+def _hc_table():
     file_path = files("celeste.data").joinpath("Hydrocarbons_ChemProp.csv").as_posix()
     df = pd.read_csv(file_path, skipinitialspace=True)
     df.columns = df.columns.str.strip()
-
-    obj_cols = df.select_dtypes(include="object").columns
+    obj_cols = df.select_dtypes(include=["object", "string"]).columns
     df[obj_cols] = df[obj_cols].apply(lambda s: s.str.strip())
+    return df.set_index("Formula")
 
-    df = df.set_index("Formula")
+
+@lru_cache(maxsize=None)
+def _hc_data(species: tuple, hc_species: tuple) -> dict:
+    '''Property arrays for a species set (cached: table look-ups are slow compared to the property call).'''
+    df = _hc_table()
+    data = df.loc[list(species)]
+    hc = df.loc[list(hc_species)]
+    num = lambda frame, col: frame[col].to_numpy(dtype=float)
+    out = dict(
+        lhv=num(data, 'LHV_kJ/mol'), MW=num(data, 'MW'), H_N=num(data, 'H_N'),
+        HVAP_B=num(hc, 'HVAP_B'), HVAP_n=num(hc, 'HVAP_n'), T_boil=num(hc, 'T_boil_K'), Tc=num(hc, 'Crit_T_K'),
+        HVAP_Tmin=num(hc, 'HVAP_Tmin_K'), HVAP_Tmax=num(hc, 'HVAP_Tmax_K'), cpl=num(hc, 'cp_std_liq_kJ/mol*K'),
+        C_N=num(hc, 'C_N'),
+    )
+    for v in out.values():
+        v.setflags(write=False)
+    return out
+
+
+class Thermo:
     R = 8.314462618e-3
-    
+
+    @th._classproperty
+    def df(cls):
+        '''Hydrocarbon property table indexed by formula (loaded on first access).'''
+        return _hc_table()
+
+    _m = np.array([
+        [1.60208009e-13, -3.85369069e-10, 2.84263828e-7, -2.1076165e-5, 0.0126558917],
+        [-2.03518749e-11, 2.39474418e-8, 2.18318243e-5, 5.40208647e-3,-24.959112],
+        [-3.21627106e-14, 5.28128653e-11,-4.63466461e-8, 9.28472733e-5, 0.0147243196]
+    ])
+    _c = np.array([
+        [-3.32104578e-13, 7.15023059e-10, -4.77027078e-7, 1.21672696e-4, -0.00329707471],
+        [2.12326032e-11,-1.2232199e-8,-6.26259659e-6, 1.17389703e-2,- 44.6550556],
+        [-6.42129853e-14, 1.91117309e-10,-1.89411673e-7, 9.19937061e-5,0.136713671]
+    ])
+
     def __init__(self, species, T, Xi, phase='Gas', P=1., T_unit='K'):
-    
+
         self.species = species
-        self._phase = phase  
+        self._phase = phase
 
         self._phaseID = 1 if phase == 'liquid' or phase == 'Liquid' else 0
 
         # separate NASA and HC components
-        self._spFuelCH4, self._spHC = self.getSpecies() 
-        
+        self._spFuelCH4, self._spHC = self.getSpecies()
+
         if T_unit in ['C', 'c']:
             T = T + 273.15
-        
-        self._T = T 
-        
+
+        self._T = T
+
         self._Xi = Xi
         self._P = P
         self.__NFuelCH4 = len(self._spFuelCH4)
         self.__NHC = len(self._spHC)
 
-        self.__DATA = self.df.loc[self.species] 
-        ## HC thermo data
-        self.__DATA_HC = self.df.loc[self._spHC] 
+        data = _hc_data(tuple(self.species), tuple(self._spHC))
         ## LHV at standard conditions
         '''
         from C1 to C4 --> gas phase
         from C5 to C15 --> liquid phase
         '''
-        self.__DATA['lhv'] = self.__DATA[f'LHV_kJ/mol']   
-        self._MWi = self.__DATA['MW'].values
-        
-        self.HNumberi = self.__DATA['H_N'].values 
-        
-        self.__HVAP_B = self.__DATA_HC['HVAP_B'].values 
-        self.__HVAP_n = self.__DATA_HC['HVAP_n'].values #, dtype=object)
-        self.__HVAP_Tb =self.__DATA_HC['T_boil_K'].values
-        self.__HVAP_Tc = self.__DATA_HC['Crit_T_K'].values
-        self.__HVAP_Tmin = self.__DATA_HC['HVAP_Tmin_K'].values
-        self.__HVAP_Tmax = self.__DATA_HC['HVAP_Tmax_K'].values
-     
-        self.__cpl = self.__DATA_HC['cp_std_liq_kJ/mol*K'].values
-        self.CNumberi = self.__DATA_HC['C_N'].values
-        
-        self.__m = np.array([
-            [1.60208009e-13, -3.85369069e-10, 2.84263828e-7, -2.1076165e-5, 0.0126558917],
-            [-2.03518749e-11, 2.39474418e-8, 2.18318243e-5, 5.40208647e-3,-24.959112],
-            [-3.21627106e-14, 5.28128653e-11,-4.63466461e-8, 9.28472733e-5, 0.0147243196]
-        ])
-        self.__c = np.array([
-            [-3.32104578e-13, 7.15023059e-10, -4.77027078e-7, 1.21672696e-4, -0.00329707471],
-            [2.12326032e-11,-1.2232199e-8,-6.26259659e-6, 1.17389703e-2,- 44.6550556],
-            [-6.42129853e-14, 1.91117309e-10,-1.89411673e-7, 9.19937061e-5,0.136713671]
-        ])
+        self._lhv_i = data['lhv']
+        self._MWi = data['MW']
+        self.HNumberi = data['H_N']
 
-        self.thermoArr()      
-        
+        ## HC thermo data
+        self.__HVAP_B = data['HVAP_B']
+        self.__HVAP_n = data['HVAP_n']
+        self.__HVAP_Tb = data['T_boil']
+        self.__HVAP_Tc = data['Tc']
+        self.__HVAP_Tmin = data['HVAP_Tmin']
+        self.__HVAP_Tmax = data['HVAP_Tmax']
+        self.__cpl = data['cpl']
+        self.CNumberi = data['C_N']
+
+        self.__m = self._m
+        self.__c = self._c
+
+        self.thermoArr()
+
         if self.__NFuelCH4 > 0:
-            self.__FuelCH4_Th = th.Thermo(self._spFuelCH4, self._T, np.zeros((self.__NFuelCH4)), self._P) 
+            self.__FuelCH4_Th = th.Thermo(self._spFuelCH4, self._T, np.zeros((self.__NFuelCH4)), self._P)
         else:
-            self.__FuelCH4_Th = th.ThermoDum(self._T)    
-        
+            self.__FuelCH4_Th = th.ThermoDum(self._T)
+
         if self.__NHC > 0:
             self.calcThermoHC()
         else: # temporary
             self.__HC_cp, self.__HC_h, self.__HC_s, self.__HC_g = np.array([]), np.array([]), np.array([]),np.array([])
-        
+
         self.calcThermoSep()
         self.calcThermoMix()
-        
-    
+
     ## Methods 
     def getSpecies(self):
         hc = []
@@ -192,20 +206,23 @@ class Thermo:
     
     def calcThermoMix(self):
         
-        thermMix = th._ThermoMix(self._Xi, self.cp_i, self.h_i, self.s_i, self._P)
-        self.cp = thermMix[0] 
-        self.h = thermMix[1] 
-        self.s_T = thermMix[2] 
-        self.s = self.s_T - self.R*thermMix[3] 
+        # species below 1e-6 are left out (this also masks hydrocarbons without liquid-phase data)
+        X = np.asarray(self._Xi, dtype=float)
+        on = X >= 1e-6
+        Xa = X[on]
+        self.cp = np.sum(Xa*self.cp_i[on])
+        self.h = np.sum(Xa*self.h_i[on])
+        self.s_T = np.sum(Xa*self.s_i[on])
+        self.s = self.s_T - self.R*np.sum(Xa*np.log(Xa*self._P))
         self.g = self.h - self._T*self.s
 
     @property
     def LHVmix(self): # data in HC
-        return np.dot(self.__DATA['lhv'], self._Xi)
+        return np.dot(self._lhv_i, self._Xi)
         
     # LHV of a given specie
     def LHVi(self, specie):
-        return  self.__DATA['lhv'][specie]
+        return self._lhv_i[list(self.species).index(specie)]
     
     @property
     def phase(self):
@@ -375,94 +392,136 @@ class Thermo:
         return 1/Pdew
 ''' 
     
-class ThermoExergy:   
-
-    file_path = files("celeste.data").joinpath("Chem_exergies.csv").as_posix() 
+@lru_cache(maxsize=1)
+def _exergy_table():
+    file_path = files("celeste.data").joinpath("Chem_exergies.csv").as_posix()
     df = pd.read_csv(file_path, skipinitialspace=True)
     df.columns = df.columns.str.strip()
-
-    obj_cols = df.select_dtypes(include="object").columns
+    obj_cols = df.select_dtypes(include=["object", "string"]).columns
     df[obj_cols] = df[obj_cols].apply(lambda s: s.str.strip())
+    return df.set_index("Name")
 
-    df = df.set_index("Name")
-    
+
+@lru_cache(maxsize=None)
+def standard_chemical_exergy(species: tuple) -> np.ndarray:
+    '''Standard chemical exergy [kJ/mol] at 298.15 K, 1 bar for a tuple of species names (cached).'''
+    col = _exergy_table()['Standard Chem Exergy kJ/mol']
+    missing = [sp for sp in species if sp not in col.index]
+    if missing:
+        raise KeyError(f"No standard chemical exergy tabulated for {missing} (see celeste/data/Chem_exergies.csv)")
+    out = np.array(col[list(species)], dtype=float)
+    out.setflags(write=False)
+    return out
+
+
+@lru_cache(maxsize=None)
+def _reference_nasa(species: tuple, T0: float):
+    '''(h_i, s_i) at the dead-state temperature from the NASA polynomials.'''
+    d = _nasa.nasa_data(species)
+    _, h_i, s_i = _nasa.pure_props(np, T0, d.a, d.T_break, d.T_lo, d.T_hi)
+    return h_i, s_i
+
+
+@lru_cache(maxsize=None)
+def _reference_ft(species: tuple, T0: float, P0: float, phase: str):
+    '''(h_i, s_i) at the dead-state temperature from the FT property model.'''
+    ref = Thermo(species=list(species), T=T0, Xi=np.full(len(species), 1.0/len(species)), P=P0, phase=phase)
+    return ref.h_i, ref.s_i
+
+
+class ThermoExergy:
+    '''
+    Molar exergy [kJ/mol] of a stream: physical + chemical part, relative to the
+    dead state T0 = 298.15 K, P0 = 1 bar with water condensing at its saturation
+    pressure ``Ps``.
+
+    The object only reads from ``Medium`` (species list and species properties at
+    ``T``); the state of the medium is left untouched unless its temperature
+    differs from ``T``. Reference-state values and chemical exergies are cached
+    per species set, so creating this object is cheap.
+    '''
     Ps = 0.03169 #0.03137185#
     T0 = 298.15
     P0 = 1 # bar
-    R =  8.314462618e-3 
-    
-    def __init__(self, Medium, Xi=None, T=None, P=None, phase='Gas'): 
-        self.Medium = Medium         
+    R =  8.314462618e-3
+
+    @th._classproperty
+    def df(cls):
+        '''Standard chemical exergy table indexed by species name (loaded on first access).'''
+        return _exergy_table()
+
+    def __init__(self, Medium, Xi=None, T=None, P=None, phase='Gas'):
+        self.Medium = Medium
+        Xi = np.asarray(Xi, dtype=float)
         self.Xi = np.where(Xi>=1e-6, Xi, 1e-12)
         self.T = T
         self.P = P
         self.phase = phase
-        
-        ## thermo at PTXi
-        self.Medium.phase = self.phase # has to be checked with the FT
-        self.Medium.PTX = self.P, self.T, self.Xi
+        species = tuple(str(sp) for sp in self.Medium.species)
+
+        ## thermo at T: species values do not depend on P or Xi
+        if self.Medium.T != T:
+            self.Medium.T = T
         self.__h_i = self.Medium.h_i
         self.__s_i = self.Medium.s_i # s for each specie without P effect
-        self.__th_T0 = Thermo(species=self.Medium.species, T=self.T0, Xi=self.Xi, P=self.P0, phase=self.phase)
-        self.__h0_i = self.__th_T0.h_i
-        self.__s0_i = self.__th_T0.s_i # s for each specie without P effect @ standard conditions
+        ## thermo at the dead state, from the same property model as the medium
+        if isinstance(self.Medium, Thermo):
+            self.__h0_i, self.__s0_i = _reference_ft(species, self.T0, self.P0, phase)
+        else:
+            self.__h0_i, self.__s0_i = _reference_nasa(species, self.T0)
         ### thermo of liquid water at T0
-        self.__th_H2OL_T0 = th.Thermo(species=['H2O(L)'], T=self.T0, Xi=np.array([1]), P=self.P0)
-        self.__h0__H2OL = self.__th_H2OL_T0.h
-        self.__s0__H2OL = self.__th_H2OL_T0.s 
-            
-        self.__x_00_H2O = self.Ps/self.P0 # Raoult's law
-        
-        if 'H2O' in self.Medium.species: # only for steam
-            self.__H2O = self.Medium.species.index('H2O')    
-        else:
-            self.__H2O = None   
+        h0_w, s0_w = _reference_nasa(('H2O(L)',), self.T0)
+        self.__h0__H2OL = h0_w[0]
+        self.__s0__H2OL = s0_w[0]
 
-        if 'H2O(L)' in self.Medium.species: # only for liquid H2O
-            self.__H2OL = self.Medium.species.index('H2O(L)') 
-        else:
-            self.__H2OL = None   
+        self.__x_00_H2O = self.Ps/self.P0 # Raoult's law
+
+        self.__H2O = species.index('H2O') if 'H2O' in species else None         # only for steam
+        self.__H2OL = species.index('H2O(L)') if 'H2O(L)' in species else None  # only for liquid H2O
         # standard chemical exergy [kJ/mol] at 298.15 and 100 kPa from Baehr, 2012, 'Thermodynamik' --> changed to another source
         # For alkanes from C5-C50 it is calculated with the h°f(l) and s°f(l)
-        self.__stEx = np.array(self.df['Standard Chem Exergy kJ/mol'][self.Medium.species], dtype=float)
-        self.__stEx_H2OL = np.array(self.df['Standard Chem Exergy kJ/mol']['H2O(L)'], dtype=float)
-        
+        self.__stEx = standard_chemical_exergy(species)
+        self.__stEx_H2OL = standard_chemical_exergy(('H2O(L)',))[0]
+
     @property
     def Ex(self):
-        return self.streamPhysExergy() + self.streamChemExergy() 
-    
-        
-    def streamPhysExergy(self):       
+        return self.streamPhysExergy() + self.streamChemExergy()
+
+    def _dead_state_split(self):
+        '''Gas composition x_0 and phase split (n_V, n_L, n_H2O) when steam condenses at the dead state.'''
+        if self.Xi[self.__H2O] == 1:
+            x_0 = self.Xi
+        else:
+            x_0 = self.Xi*(1-self.__x_00_H2O)/(1 - self.Xi[self.__H2O])
+            x_0[self.__H2O] = self.__x_00_H2O
+        n_V = (1 - self.Xi[self.__H2O])/(1 - self.__x_00_H2O) # Ratio of stream that is in gas/vapour phase at dead state
+        n_L = 1 - n_V # Ratio of stream that condenses at dead state conditions
+        n_H2O = n_L + n_V*x_0[self.__H2O]
+        return x_0, n_V, n_L, n_H2O
+
+    def streamPhysExergy(self):
         if self.__H2O is not None: # steam
             # For gas mixtures with steam, there is steam condensation at the dead state conditions
             # Therefore need to normalise other gases to new water composition
             if self.Xi[self.__H2O] <= self.__x_00_H2O: # When water fraction is less than saturation, no condensation
                 # Calculate enthalpy and entropy change of each species
                 dH_T_i = self.__h_i - self.__h0_i
-                dS_TP_i = self.__s_i - self.__s0_i - self.R*np.log(self.P)   
+                dS_TP_i = self.__s_i - self.__s0_i - self.R*np.log(self.P)
             else: # When water fraction is more than saturation, condensation will occur
                 # Calculate gas phase composition at dead state
-                if self.Xi[self.__H2O] == 1:
-                    x_0 = self.Xi
-                else:
-                    x_0 = self.Xi*(1-self.__x_00_H2O)/(1 - self.Xi[self.__H2O])
-                    x_0[self.__H2O] = self.__x_00_H2O   
-                
-                n_V = (1 - self.Xi[self.__H2O])/(1 - self.__x_00_H2O) # Ratio of stream that is in gas/vapour phase at dead state 
-                n_L = 1 - n_V # Ratio of stream that condenses at dead state conditions
-                n_H2O = n_L + n_V*x_0[self.__H2O]  
-                # Calculate enthalpy and entropy change of each species  
-                dH_T_i = self.__h_i - self.__h0_i 
+                x_0, n_V, n_L, n_H2O = self._dead_state_split()
+                # Calculate enthalpy and entropy change of each species
+                dH_T_i = self.__h_i - self.__h0_i
                 dS_TP_i = self.__s_i - self.__s0_i - self.R*np.log(self.Xi*self.P/x_0, where=(x_0>=1e-6), out=np.zeros_like(self.Xi))
                 dH_T_i[self.__H2O]  = (n_H2O*self.__h_i[self.__H2O] - n_L*self.__h0__H2OL - x_0[self.__H2O]*n_V*self.__h0_i[self.__H2O])/n_H2O
-                dS_TP_i[self.__H2O] =  (n_H2O*(self.__s_i[self.__H2O] - self.R*np.log(n_H2O*self.P)) - n_L*self.__s0__H2OL - 
+                dS_TP_i[self.__H2O] =  (n_H2O*(self.__s_i[self.__H2O] - self.R*np.log(n_H2O*self.P)) - n_L*self.__s0__H2OL -
                                       x_0[self.__H2O]*n_V*(self.__s0_i[self.__H2O] - self.R*np.log(x_0[self.__H2O])) )/n_H2O
         else:
             # For gas mixtures that do not contain steam, there is no condensation (need to modify for gasses that do condense)
             # Calculate enthalpy and entropy change of each species
             dS_TP_i = self.__s_i - self.__s0_i  - self.R*np.log(self.P)
             dH_T_i = self.__h_i - self.__h0_i
-            if self.__H2OL: # entropy not affected by pressure
+            if self.__H2OL is not None: # entropy not affected by pressure
                 dS_TP_i[self.__H2OL] = self.__s_i[self.__H2OL] - self.__s0__H2OL
 
         # Calculate Physical Exergy
@@ -470,30 +529,23 @@ class ThermoExergy:
         dS_TP = np.dot(self.Xi, dS_TP_i)
         Ex_ph = dH_T - self.T0*dS_TP
         return Ex_ph
-    
+
     def streamChemExergy(self):
         if self.__H2O is not None:
-            if self.Xi[self.__H2O] <= self.__x_00_H2O: 
+            if self.Xi[self.__H2O] <= self.__x_00_H2O:
                 x_0 = self.Xi
                 # Calculate Chemical Exergy
-                Ex_ch_i = self.__stEx + self.R*self.T0*np.log(x_0, where=(x_0>=1e-6), out=np.zeros_like(x_0))   
-            else:          
-                if self.Xi[self.__H2O] == 1:
-                    x_0 = self.Xi
-                else:
-                    x_0 = self.Xi*(1-self.__x_00_H2O)/(1 - self.Xi[self.__H2O])
-                    x_0[self.__H2O] = self.__x_00_H2O  
-                n_V = (1 - self.Xi[self.__H2O])/(1 - self.__x_00_H2O) # Ratio of stream that is in gas/vapour phase at dead state 
-                n_L = 1 - n_V # Ratio of stream that condenses at dead state conditions
-                n_H2O = n_L + n_V*x_0[self.__H2O] 
+                Ex_ch_i = self.__stEx + self.R*self.T0*np.log(x_0, where=(x_0>=1e-6), out=np.zeros_like(x_0))
+            else:
+                x_0, n_V, n_L, n_H2O = self._dead_state_split()
                 # Calculate Chemical Exergy
                 Ex_ch_i = self.__stEx + self.R*self.T0*np.log(x_0, where=(x_0>=1e-6), out=np.zeros_like(x_0))
                 Ex_ch_i[self.__H2O] = (x_0[self.__H2O]*n_V*(self.__stEx[self.__H2O] + self.R*self.T0*np.log(x_0[self.__H2O])) + n_L*self.__stEx_H2OL)/n_H2O
-       
+
         else:
-            Ex_ch_i = self.__stEx + self.R*self.T0*np.log(self.Xi, where=(self.Xi>=1e-6), out=np.zeros_like(self.Xi)) 
+            Ex_ch_i = self.__stEx + self.R*self.T0*np.log(self.Xi, where=(self.Xi>=1e-6), out=np.zeros_like(self.Xi))
             if self.__H2OL is not None:
                 Ex_ch_i[self.__H2OL] = self.__stEx[self.__H2OL]
-            
-        Ex_ch = np.dot(self.Xi, Ex_ch_i) 
-        return Ex_ch     
+
+        Ex_ch = np.dot(self.Xi, Ex_ch_i)
+        return Ex_ch

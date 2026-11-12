@@ -50,9 +50,6 @@ class RStoic(ModelBase): #base.ModelBase
         return MB
     
     def ExBs(self):
-        self.FH0.ExBs()
-        self.F0.ExBs()
-        self.F1.ExBs()
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss = self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
         self.Exeff = 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.FH0.n*self.FH0.Ex + np.maximum(0, self.Exth)) 
@@ -200,9 +197,6 @@ class FT(ModelBase):
         return MB
         
     def ExBs(self)->None:
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
         self.Exth:float = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth
         self.Exeff:float = 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))      
@@ -250,10 +244,6 @@ class Dist(components.GPUbase):
         return MB
     
     def ExBs(self):
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
-        self.F3.ExBs()
         self.Wid = self.F3.n*self.F3.Ex + self.F2.n*self.F2.Ex + self.F1.n*self.F1.Ex - self.F0.n*self.F0.Ex
         self.W = float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
     
@@ -353,12 +343,6 @@ class Hydrocracker(ModelBase):
         return MB
     
     def ExBs(self):
-        self.F0.ExBs()
-        self.FH0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
-        self.F3.ExBs()
-        self.F4.ExBs()
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss = (self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex 
                         - self.F2.n*self.F2.Ex - self.F3.n*self.F3.Ex - self.F4.n*self.F4.Ex + self.Exth)

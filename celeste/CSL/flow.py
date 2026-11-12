@@ -1,16 +1,13 @@
 '''
 Flow related objects i.e. sources, sinks and pipes
 '''
-#from CELESTE2 import 
 from . import interfaces, ModelBase
+from .. import solvers
 import numpy as np
-import scipy.optimize as spo
 
 import numpy.typing as npt
-import typing
 
 
-		
 class SourceM(ModelBase):
     '''
     1+nSpecies unknowns
@@ -59,12 +56,6 @@ class Splitter(ModelBase):
         self.F1.n = self.split*self.F0.n
         self.F2.n = (1-self.split)*self.F0.n
     
-    def MBcheck(self):
-        # Mass balance
-        MB = self.F0.m - self.F1.m - self.F2.m
-        print(f"{abs((self.F0.m/(+ self.F1.m+self.F2.m)) - 1)*100}% difference ")    
-        return MB
-    
     @property
     def Exloss(self):
         return self.F0.n*self.F0.Ex - self.F2.n*self.F2.Ex - self.F1.n*self.F1.Ex 
@@ -78,6 +69,7 @@ class Splitter(ModelBase):
 
     
 class Mixer(ModelBase):
+    _inlet_ports = ('F0', 'F1')   # two feeds, one product (F2)
     
     def __init__(self, name, Medium, T=298.15, P=1.,
                  F0_n=1, F0_Xi=None, 
@@ -101,12 +93,6 @@ class Mixer(ModelBase):
     def Q(self):
         return self.F2.h*self.F2.n - (self.F1.h*self.F1.n + self.F0.h*self.F0.n)
 
-    def MBcheck(self):
-        # Mass balance
-        MB = self.F0.m + self.F1.m - self.F2.m
-        print(f"{abs(((self.F0.m + self.F1.m)/self.F2.m) - 1)*100}% difference ")    
-        return MB
-
     @property  
     def Exloss(self):
         return (self.F0.n*self.F0.Ex + self.F1.n*self.F1.Ex) - self.F2.n*self.F2.Ex 
@@ -119,26 +105,14 @@ class Mixer(ModelBase):
         self.F2.T = x[0]
         return self.Eqs()
 
-    def run_sol(self): 
-        # Bounds: outlet T must be between inlet temperatures
-        T_min = min(self.F0.T, self.F1.T) * 0.95  # Allow 5% margin
-        T_max = max(self.F0.T, self.F1.T) * 1.05
-        
-        # Initial guess: enthalpy-weighted average
-        if not np.isclose(self.F0.T, self.F1.T):
-            x0 = np.array([(self.F0.T * self.F0.n + self.F1.T * self.F1.n) / (self.F0.n + self.F1.n)])
-            x0_clipped = np.clip(x0, T_min, T_max)
-            
-            sol = spo.least_squares(self.f_sol, x0_clipped, bounds=([T_min], [T_max]))
-            
-            res = self.f_sol(sol.x)
-            if not sol.success or np.linalg.norm(res) > 1e-5:
-                print(f'{self.name} Failed: residual={np.linalg.norm(res):.2e}, '
-                    f'T=[{self.F0.T:.1f}, {self.F1.T:.1f}] → {self.F2.T:.1f}')
-    
-            return sol
-        else:
+    def run_sol(self):
+        """Adiabatic mixing: the outlet temperature follows from the energy balance."""
+        if np.isclose(self.F0.T, self.F1.T):
             self.f_sol([self.F0.T])
-            return 1
+            return solvers.trivial_solution([self.F0.T])
 
-
+        # the outlet temperature lies between the inlet temperatures (5 % margin for non-ideal cases)
+        T_min = min(self.F0.T, self.F1.T) * 0.95
+        T_max = max(self.F0.T, self.F1.T) * 1.05
+        x0 = (self.F0.T * self.F0.n + self.F1.T * self.F1.n) / (self.F0.n + self.F1.n)
+        return solvers.solve(self.f_sol, [x0], bounds=([T_min], [T_max]), tol=1e-5, name=self.name)

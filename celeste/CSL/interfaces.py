@@ -6,14 +6,33 @@ import copy
 import numpy as np
 from numpy.typing import NDArray as npArray
 import pandas as pd
-import scipy.optimize as spo
 
 from . import media
-from .. import Base
+from .. import Base, solvers
 from ..FT import thermoFT as thFT
 from ..functions import carbonFraction
 
 class Flange(Base):
+    '''
+    Port of a unit model. A flange carries the state of a stream (molar flow n,
+    mole fractions Xi, temperature T, pressure P) and owns a private copy of the
+    medium that turns this state into properties.
+
+    Parameters:
+        name:   name of the port, by convention '<unit name>.<port name>'
+        Medium: medium object from ``celeste.CSL.media`` (copied, never shared)
+        n:      molar flow in [mol/s]
+        Xi:     mole fractions; defaults to the reference composition of the medium
+        T:      temperature in [K]
+        P:      pressure in [bar]
+
+    Properties:
+        h, s, g, cp:  molar enthalpy, entropy, Gibbs energy [kJ/mol, kJ/mol/K]
+        mw, m, Yi:    molar mass [g/mol], mass flow [g/s], mass fractions
+        Ex:           molar exergy [kJ/mol];  LHV: lower heating value [kJ/mol]
+
+    Setting T, P or Xi updates the properties.
+    '''
 
     _pin_vars = ['n', 'Xi', 'T', 'P']
     _flow_vars = []
@@ -154,34 +173,44 @@ class Flange(Base):
         
     @property
     def Ex(self):
+        '''
+        Specific Exergy (physical + chemical) /kJ/mol
+        '''
+        exergy = getattr(self.Medium, 'exergy', None)   # media with their own exergy model (e.g. Medium_PRbase)
+        if exergy is not None:
+            return exergy()
         return self.ExergyObj.Ex
     
     @property
     def LHV(self):
+        '''
+        Lower Heating Value /kJ/mol
+        '''
         return self.Medium.LHVmix
 
-    def T_hx(self, h, X):
-     
-        self.Xi = X
-        
-        def loss(t, h_args=h):
-            self.T = t[0]
-            return np.abs(self.h - h_args)
-        
-        sol = spo.least_squares(loss, self.T, bounds=(273.15, 2000.), args=(h,))
-        self.T = sol.x[0]
+    def _solve_T(self, residual, T_bounds, name):
+        def fun(t):
+            self.T = t
+            return residual()
+        sol = solvers.solve_scalar(fun, T_bounds[0], T_bounds[1], x0=min(max(self.T, T_bounds[0]), T_bounds[1]),
+                                   name=f'{self.name}.{name}')
+        self.T = float(sol.x[0])
+        return sol
 
-    def T_sPX(self, s, P, X):
+    def T_hx(self, h, X, T_bounds=(273.15, 2000.)):
+        '''
+        Set the composition to X and the temperature such that the molar enthalpy equals h [kJ/mol]
+        '''
+        self.Xi = X
+        return self._solve_T(lambda: self.h - h, T_bounds, 'T_hx')
+
+    def T_sPX(self, s, P, X, T_bounds=(273.15, 2000.)):
+        '''
+        Set pressure and composition and the temperature such that the molar entropy equals s [kJ/mol/K]
+        '''
         self.P = P
         self.Xi = X
-
-        def loss(T, s):
-            self.T = T[0]
-            res = np.abs(self.s*1e3 - s*1e3)
-            return res
-        
-        sol = spo.least_squares(loss, self.T, bounds=(273.15, 2000.), args=(s,))
-        self.T = sol.x[0] 
+        return self._solve_T(lambda: (self.s - s)*1e3, T_bounds, 'T_sPX')
 
     def getCarbon(self, T_drop=0):
         return carbonFraction(self.T-T_drop, self.P, dict(zip(self.Medium.species, self.Xi)))

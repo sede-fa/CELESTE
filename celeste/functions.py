@@ -1,11 +1,16 @@
-import functools
-import numpy as np
-import scipy as sp
-import cantera as ct
-
 import base64
-from IPython.display import display_svg
-from urllib.request import Request, urlopen
+import functools
+
+import numpy as np
+import scipy.constants
+
+
+def _cantera():
+    try:
+        import cantera as ct
+    except ImportError as err:  # pragma: no cover - depends on the environment
+        raise ImportError("carbonFraction() needs the optional dependency cantera: pip install 'celeste[cantera]'") from err
+    return ct
 
 
 def toSolve(x, sys, *args):
@@ -45,6 +50,7 @@ def carbonFraction(T, P, x_dict):
         Solid carbon mole fraction (0 to 1)
     '''
     
+    ct = _cantera()
     T_K = T
     P_Pa = P * 1e5
     
@@ -109,7 +115,7 @@ def CForm(T, P, x):
     if K_2/betha > 1 -> is likely to have carbon deposition
     '''
     
-    R = sp.constants.value(u"molar gas constant") # J/mol*K
+    R = scipy.constants.R # J/mol*K
     T_K = T + 273.15
     Po = 1e5 
     P_Pa = P*Po 
@@ -132,6 +138,9 @@ def CForm(T, P, x):
     return variables
 
 def mm(graph):
+    """Render a Mermaid graph in a notebook through the mermaid.ink web service (needs IPython and internet access)."""
+    from urllib.request import Request, urlopen
+    from IPython.display import display_svg
     graphbytes = graph.encode("ascii")
     base64_bytes = base64.b64encode(graphbytes)
     base64_string = base64_bytes.decode("ascii")

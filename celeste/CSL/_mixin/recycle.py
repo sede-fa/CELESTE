@@ -40,7 +40,7 @@ class RecycleMixin:
             x = g_x
             count += 1
             if print_err and count % 100 == 0:
-                print(f"  FPI iter {count}: error={error:.2e}, n={x[0]:.4f}")
+                print(f"  FPI iter {count}: error={error:.2e}, n={float(np.ravel(x)[0]):.4f}")
 
         if print_err:
             if count >= max_iter:
@@ -63,7 +63,7 @@ class RecycleMixin:
             x = q * x + (1 - q) * F_source.n
             count += 1
             if print_err and count % 100 == 0:
-                print(f"  Wegstein q iter {count}: error={error:.2e}, n={x[0]:.4f}")
+                print(f"  Wegstein q iter {count}: error={error:.2e}, n={float(np.ravel(x)[0]):.4f}")
 
         if print_err:
             if count >= max_iter:
@@ -95,7 +95,7 @@ class RecycleMixin:
             x[2] = abs((x[0] * g[1] - x[1] * g[0]) / (x[0] + g[1] - x[1] - g[0]))
             count += 1
             if print_err and count % 100 == 0:
-                print(f"  Wegstein Generic iter {count}: error={error:.2e}, n={x[0]:.4f}")
+                print(f"  Wegstein Generic iter {count}: error={error:.2e}, n={float(np.ravel(x)[0]):.4f}")
 
         if print_err:
             if count >= max_iter:
@@ -146,7 +146,7 @@ class RecycleMixin:
             x[2] = x[1] * q + (1 - q) * f[1]
             count += 1
             if print_err and count % 100 == 0:
-                print(f"  Wegstein Generic 2 iter {count}: error={error:.2e}, n={x[0]:.4f}")
+                print(f"  Wegstein Generic 2 iter {count}: error={error:.2e}, n={float(np.ravel(x)[0]):.4f}")
 
         if print_err:
             if count >= max_iter:
@@ -177,10 +177,12 @@ class RecycleMixin:
             x[1] = F_source.n
             error = self.recycle_solver(x[1], F_source, F_sink, flow_method, False)
             x[2] = F_source.n
-            x[0] = x[0] - ((x[1] - x[0]) ** 2) / (x[2] - 2 * x[1] + x[0])
+            denominator = x[2] - 2 * x[1] + x[0]
+            # a vanishing second difference means the iteration has converged: keep the last iterate
+            x[0] = x[0] - ((x[1] - x[0]) ** 2) / denominator if abs(denominator) > 1e-14 else x[2]
             count += 1
             if print_err and count % 100 == 0:
-                print(f"  Steffensen iter {count}: error={error:.2e}, n={x[0]:.4f}")
+                print(f"  Steffensen iter {count}: error={error:.2e}, n={float(np.ravel(x)[0]):.4f}")
 
         if print_err:
             if count >= max_iter:
@@ -250,10 +252,12 @@ class RecycleMixin:
             print(f"Starting with {n_fpi_initial} FPI iterations...")
 
         for i in range(n_fpi_initial):
+            x_prev = x
             self.recycle_solver(x, F_source, F_sink, flow_method, print_err=False)
             x = F_source.n
             count += 1
-            error = np.abs((x - F_source.n) / max(F_source.n, 1e-10))
+            # change between successive iterates (comparing x with F_source.n is always zero here)
+            error = np.abs((x - x_prev) / max(abs(x), 1e-10))
 
         if print_err:
             print("Switching to Aitken acceleration...")

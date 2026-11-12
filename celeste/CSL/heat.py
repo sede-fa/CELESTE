@@ -3,8 +3,8 @@ Heat Flow related objects i.e. sources, sinks and pipes
 '''
 
 from . import interfaces, ModelBase, media
+from .. import solvers
 import numpy as np
-import scipy.optimize as spo
 from numpy.typing import NDArray as npArray
 
 class HexBase(ModelBase):
@@ -126,15 +126,28 @@ class HexBase(ModelBase):
 
     def run_sol(self):
         x0=np.array([self.H0.T,self.C0.T])
-        sol = spo.root(self.f_sol, x0)
-        return sol
+        return solvers.solve(self.f_sol, x0, name=self.name)
    
 class HexNTU(HexBase):
-    """_summary_
+    """
+    Two-stream heat exchanger rated with the effectiveness-NTU method.
 
-    Args:
-        HexBase (_type_): _description_
-        when HexType is counter-flow or co-flow the UA is in J/K*s
+    Parameters:
+        name:    objects name
+        MediumH: media of the hot stream (ports H0 -> H1)
+        MediumC: media of the cold stream (ports C0 -> C1)
+        UA:      overall conductance in W/K for 'counter-flow' and 'co-flow';
+                 for any other HexType it is used directly as the effectiveness (0..1)
+        HexType: 'counter-flow', 'co-flow' or anything else for a fixed effectiveness
+
+    Properties:
+        NTU, Cr, epsilon: number of transfer units, capacity ratio, effectiveness
+        Q: heat transferred from the hot to the cold stream [kJ/s]
+
+    Example:
+        hx = HexNTU('hx', MediumH=media.Air(), MediumC=media.Air(), UA=50.)
+        hx.H0.T, hx.C0.T = 800., 300.
+        hx.run_sol()          # sets hx.H1.T and hx.C1.T
     """
 
     def __init__(self, name:str, MediumH:media.Medium_Base, MediumC:media.Medium_Base, UA=0.99, HexType='counter-flow'):
@@ -239,12 +252,6 @@ class Heater(ModelBase):
     @property
     def Q(self):
         return (self.F1.n*self.F1.h - self.F0.n*self.F0.h)
-    
-    def MBcheck(self):
-        # Mass balance
-        MB = self.F0.m - self.F1.m
-        print(f"{abs((self.F0.m/self.F1.m) - 1)*100}% difference ")    
-        return MB
     
     @property
     def Exth(self):

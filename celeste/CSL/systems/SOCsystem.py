@@ -11,23 +11,23 @@ class SOCBasicSys(SysBase):
     def __init__(self, name, nf0, Xf0, na0, Xa0, I, Ncells, T_soc=1073.15, P_soc=1, cellArea=127.8):
         super().__init__(locals()) #name,
         
-        self.sf1 = flow.SourceM(name + '.sf1', Medium=media.Fuel_CH4(), F1_n=nf0, F1_Xi=Xf0) 
-        self.sa1 = flow.SourceM(name + '.sa1', Medium=media.Air(), F1_n=na0, F1_Xi=Xa0) 
+        self.sf1 = flow.SourceM(name + '.sf1', Medium=media.Fuel_CH4(), F1_n=nf0, F1_Xi=Xf0, F1_T=T_soc, F1_P=P_soc) 
+        self.sa1 = flow.SourceM(name + '.sa1', Medium=media.Air(), F1_n=na0, F1_Xi=Xa0, F1_T=T_soc, F1_P=P_soc) 
         self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells) 
         self.sf2 = flow.Sink(name + '.sf2', Medium=media.Fuel_CH4()) 
         self.sa2 = flow.Sink(name + '.sa2', Medium=media.Air())  
         
         self.getObjs()
         
-    def run_sol(self):
+    def seq_sol(self, store=False):
                
-        self.connect_seq(self.sf1.F1, self.soc.F0)
-        self.connect_seq(self.sa1.F1, self.soc.A0)
+        self.connect_seq(self.sf1.F1, self.soc.F0, store=store)
+        self.connect_seq(self.sa1.F1, self.soc.A0, store=store)
         
         self.soc._sol = self.soc.run_sol()
         
-        self.connect_seq(self.soc.F1, self.sf2.F1)
-        self.connect_seq(self.soc.A1, self.sa2.F1)
+        self.connect_seq(self.soc.F1, self.sf2.F0, store=store)
+        self.connect_seq(self.soc.A1, self.sa2.F0, store=store)
       
 class SOCsysRecupe(SysBase):
     def __init__(self, name, nf0=1, na0=1e-4, T_soc=1073.15, I=0., Ncells=1000, etaHex=0.99, cellArea=100.):

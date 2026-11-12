@@ -1,12 +1,17 @@
+"""
+CELESTE - conceptual process modelling and exergy analysis in Python.
+
+    celeste.CSL   CELESTE Standard Library: unit models, media, systems
+    celeste.FT    Fischer-Tropsch specific media and units
+    celeste.HEN   heat integration: pinch analysis and heat exchanger network synthesis
+    celeste.jx    JAX kernels: properties, cubic equation of state, flash, Equinox units
+"""
 import functools
+import importlib
+from importlib.metadata import version, PackageNotFoundError
+
 import numpy as np
 import pandas as pd
-
-try:
-    from importlib.metadata import version, PackageNotFoundError
-except ImportError:
-    # For Python <3.8, fallback to importlib-metadata package
-    from importlib_metadata import version, PackageNotFoundError
 
 try:
     __version__ = version(__name__)
@@ -15,13 +20,26 @@ except PackageNotFoundError:
 
 # 1. Base - Makes variables for all inputs when creating models
 
-__all__ = ["Base"]
+__all__ = ["Base", "CSL", "FT", "HEN", "jx", "solvers", "functions"]
+
+_SUBPACKAGES = frozenset(__all__[1:])
+
+
+def __getattr__(name):
+    # sub-packages are imported on first access: ``import celeste; celeste.CSL.media.Air()``
+    if name in _SUBPACKAGES:
+        return importlib.import_module(f"{__name__}.{name}")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class Base:
+    """
+    Root of every CELESTE model. ``Base.__init__(locals())`` turns the arguments
+    of the calling ``__init__`` into attributes of the same name.
+    """
     def __init__(self, args):
         for k, v in args.items():  # for each key and value pair
-            if k in ['self']:  
+            if k in ('self', '__class__'):
                 continue
             else:
                 self.__dict__[k] = v
