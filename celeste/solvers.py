@@ -66,13 +66,14 @@ def solve(fun, x0, bounds=None, tol: float = 1e-7, scale: float = 1.0, name: str
 
     Notes
     -----
-    Unbounded square systems are tried with MINPACK's hybrid Powell method first
-    (fast, as used before); everything else, and any failure of the first
-    attempt, goes through a trust-region least-squares solve.
+    Square systems are tried with MINPACK's hybrid Powell method first (fast).
+    If that fails, or lands outside the bounds, a bounded trust-region
+    least-squares solve takes over, followed by a Newton polish.
     """
     x0 = np.atleast_1d(np.asarray(x0, dtype=float))
     tol = tol*max(abs(scale), 1e-300)
     candidates = []
+    done = False
 
     def inside(x):
         return bounds is None or bool(np.all(x >= np.asarray(bounds[0]) - 1e-12) and np.all(x <= np.asarray(bounds[1]) + 1e-12))
@@ -82,24 +83,29 @@ def solve(fun, x0, bounds=None, tol: float = 1e-7, scale: float = 1.0, name: str
         n_eq = np.atleast_1d(fun(x0)).size
         square = n_eq == x0.size
 
-        if bounds is None and square:
+        if square:
+            # fast path: MINPACK's hybrid method; with bounds its answer only counts if it respects them
             try:
-                res = spo.root(fun, x0, method="hybr")
-                candidates.append((_norm(res.fun), "hybr", res))
+                res = spo.root(fun, x0, method="hybr", options=dict(xtol=1e-13))
+                if inside(res.x):
+                    candidates.append((_norm(res.fun), "hybr", res))
+                    # a small residual is not enough: badly scaled equations (tiny equilibrium constants) have
+                    # small residuals far from the root, and MINPACK then reports that it stalled
+                    done = bool(res.success) and candidates[-1][0] <= tol
             except Exception:
                 pass
 
-        if not candidates or candidates[-1][0] > tol:
+        if not done:
             lsq_bounds = (-np.inf, np.inf) if bounds is None else bounds
             start = x0 if bounds is None else np.clip(x0, np.asarray(bounds[0], float) + 1e-12, np.asarray(bounds[1], float) - 1e-12)
-            kw = dict(xtol=1e-14, ftol=1e-14, gtol=1e-14, x_scale="jac")
+            kw = dict(xtol=1e-13, ftol=1e-13, gtol=1e-13, x_scale="jac")
             kw.update(least_squares_kw)
             try:
                 res = spo.least_squares(fun, start, bounds=lsq_bounds, **kw)
                 candidates.append((_norm(res.fun), "least_squares", res))
                 if square and candidates[-1][0] > tol:
                     # polish with a Newton-type method; accept only if it stays inside the bounds
-                    pol = spo.root(fun, res.x, method="hybr")
+                    pol = spo.root(fun, res.x, method="hybr", options=dict(xtol=1e-13))
                     if inside(pol.x):
                         candidates.append((_norm(pol.fun), "least_squares+hybr", pol))
             except Exception:

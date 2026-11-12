@@ -2,7 +2,95 @@ import numpy as np
 
 
 class RecycleMixin:
-    """Recycle-loop convergence algorithms (FPI, Wegstein, Steffensen, Aitken)."""
+    """
+    Recycle-loop convergence algorithms.
+
+    ``Recycle_Tear`` converges the whole tear stream (component flows and
+    temperature) with Anderson acceleration and is the recommended method. The older methods (FPI, Wegstein, Steffensen, Aitken) accelerate the
+    total molar flow only; composition and temperature follow by direct
+    substitution, which is slow for loops with a small purge.
+    """
+
+    def Recycle_Tear(self, F_source, F_sink, flow_method='seq_sol', eps=1e-8, max_iter=300, method='anderson',
+                     memory=5, q_bounds=(-5.0, 0.0), print_err=False):
+        """
+        Converge a recycle by iterating on the full tear stream.
+
+        The tear variables are the component molar flows and the temperature of
+        ``F_sink`` (the flange that receives the recycle); the pressure is taken
+        from ``F_source``.
+
+        Parameters:
+            F_source:    flange at the end of the loop (e.g. splitter outlet)
+            F_sink:      flange at the start of the loop (e.g. mixer inlet); its current state is the first guess
+            flow_method: name of the method (or a callable) that evaluates the loop once
+            eps:         convergence tolerance on the largest relative change of a tear variable
+            method:      'anderson' - Anderson acceleration over the last ``memory`` passes (default; accounts
+                                      for the coupling between the tear variables)
+                         'wegstein' - bounded Wegstein step on each variable, factor q within ``q_bounds``
+                         'direct'   - direct substitution
+
+        Returns:
+            (number of passes, final error)
+        """
+        if method not in ('anderson', 'wegstein', 'direct'):
+            raise ValueError("method must be 'anderson', 'wegstein' or 'direct'")
+        run = getattr(self, flow_method) if isinstance(flow_method, str) else flow_method
+
+        def pack(f):
+            return np.concatenate((f.n*np.asarray(f.Xi, dtype=float), [f.T]))
+
+        def unpack(x):
+            flows = np.maximum(x[:-1], 0.0)
+            total = flows.sum()
+            F_sink.P = F_source.P
+            F_sink.T = float(x[-1])
+            F_sink.n = float(total)
+            F_sink.Xi = flows/total if total > 0 else np.asarray(F_source.Xi, dtype=float)
+
+        x = pack(F_sink)
+        xs, gs = [], []
+        error, count = np.inf, 0
+        while count < max_iter:
+            unpack(x)
+            x = pack(F_sink)                    # what was actually applied (negative flows are clipped)
+            run()
+            g = pack(F_source)
+            count += 1
+            scale = np.maximum(np.abs(g), 1e-9*max(np.abs(g[:-1]).sum(), 1e-300))
+            error = float(np.max(np.abs(g - x)/scale))
+            if print_err and count % 10 == 0:
+                print(f"  tear pass {count}: error={error:.2e}, n={g[:-1].sum():.4f}")
+            if error < eps:
+                break
+            xs.append(x); gs.append(g)
+            xs, gs = xs[-(memory + 1):], gs[-(memory + 1):]
+            x_new = g
+            if method == 'wegstein' and len(xs) >= 2:
+                dx = xs[-1] - xs[-2]
+                ok = np.abs(dx) > 1e-14*np.maximum(np.abs(x), 1.0)
+                slope = np.divide(gs[-1] - gs[-2], dx, out=np.zeros_like(dx), where=ok)
+                q = np.clip(np.divide(slope, slope - 1.0, out=np.zeros_like(slope), where=np.abs(slope - 1.0) > 1e-12),
+                            q_bounds[0], q_bounds[1])
+                x_new = q*x + (1.0 - q)*g
+            elif method == 'anderson' and len(xs) >= 2:
+                F = (np.array(gs) - np.array(xs))/scale             # scaled residuals of the stored passes
+                dF = (F[1:] - F[:-1]).T
+                dG = (np.array(gs)[1:] - np.array(gs)[:-1]).T
+                gamma, *_ = np.linalg.lstsq(dF, F[-1], rcond=1e-10)
+                candidate = g - dG @ gamma
+                if np.all(np.isfinite(candidate)):
+                    x_new = candidate
+            x = x_new
+        unpack(g)
+        if count >= max_iter and error >= eps:
+            import warnings
+            from ...solvers import ConvergenceWarning
+            warnings.warn(f"{self.name}: recycle not converged after {max_iter} passes (error {error:.2e})",
+                          ConvergenceWarning, stacklevel=2)
+        elif print_err:
+            print(f"tear stream converged in {count} passes, error: {error:.2e}")
+        return count, error
 
     def recycle_solver(self, x, F_source, F_sink, flow_method, print_err=False):
         """
