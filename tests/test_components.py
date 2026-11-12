@@ -165,7 +165,9 @@ def test_pump_as_turbine_recovers_work():
 
 
 def test_black_box_separators(syngas_x):
-    g1 = components.GPU_1S('g', media.Fuel_CH4(), media.Fuel_CH4L(), eff=0.7, F0_n=100, F0_T=873.15, F0_P=3.0, F1_T=350.0)
+    g1 = components.GPU_1S('g', media.Fuel_CH4(), media.Fuel_CH4L(), eff=0.7)
+    g1.F0.set(n=100, T=873.15, P=3.0)
+    g1.F1.set(T=350.0)
     g1.run_sol()
     assert np.isfinite(g1.W) and g1.mass_balance() == pytest.approx(0.0, abs=1e-9)
 
@@ -173,15 +175,28 @@ def test_black_box_separators(syngas_x):
     g2.run_sol()
     assert (g2.F1.n, g2.F2.n) == pytest.approx((0.1, 0.9)) and g2.W == pytest.approx(0.8057289, rel=1e-6)
 
-    g = components.GPU_2SV2('g', media.Fuel_CH4(), Sep=np.array([1, 1, .5, .4, 0, 1]), F0_Xi=np.array([0.1, 0.3, 0.05, 0.05, 0.5, 1e-8]))
+    g = components.GPU_2SV2('g', media.Fuel_CH4(), Sep=np.array([1, 1, .5, .4, 0, 1]))
+    g.F0.set(Xi=np.array([0.1, 0.3, 0.05, 0.05, 0.5, 1e-8]))
     g.run_sol()
     assert g.F1.n == pytest.approx(0.44500001) and g.W == pytest.approx(1.5333083, rel=1e-6)
-    assert g.mass_balance() == pytest.approx(0.0, abs=1e-9) and g.Exloss < 0 < g.W
+    assert g.mass_balance() == pytest.approx(0.0, abs=1e-9) and 0 < g.W
+    assert g.energy_balance() == pytest.approx(0.0, abs=1e-12)    # the work is dissipated to the surroundings
+    assert g.Exloss == pytest.approx(0.0, abs=1e-12)                # eff = 1: reversible
 
-    g3 = components.GPU_3S('g', media.Fuel_CH4(), sep=np.array([1, 0, 1, 1, -1, 1]), F0_Xi=np.array([0.1, 0.1, 1e-8, 1e-8, 0.8, 1e-8]))
+
+def test_gpu_exergy_destruction_is_T0_times_entropy_generation():
+    g = components.GPU_2SV2('g', media.Fuel_CH4(), Sep=np.array([1, 0, 0.5, 0.2, 0, 0]), eff=0.6)
+    g.F0.set(n=3.0, Xi=np.array([0.5, 0.3, 0.1, 0.05, 1e-8, 0.05]), T=400.0, P=5.0)
+    g.run_sol()
+    assert g.W > g.Wid > 0 and g.Exloss == pytest.approx(g.W - g.Wid)
+    assert g.Exloss == pytest.approx(298.15*g.Sgen, rel=1e-7)
+    assert g.energy_balance() == pytest.approx(0.0, abs=1e-12)
+
+    g3 = components.GPU_3S('g', media.Fuel_CH4(), sep=np.array([1, 0, 1, 1, -1, 1]))
+    g3.F0.set(Xi=np.array([0.1, 0.1, 1e-8, 1e-8, 0.8, 1e-8]))
     g3.run_sol()
     assert (g3.F1.n, g3.F2.n, g3.F3.n) == pytest.approx((0.1, 0.1, 0.8), abs=1e-6)
-    assert g3.mass_balance() == pytest.approx(0.0, abs=1e-9)
+    assert g3.mass_balance() == pytest.approx(0.0, abs=1e-9) and g3.F3.Xi == pytest.approx([0, 0, 0, 0, 1, 0])
     with pytest.raises(ValueError, match='exactly one'):
         bad = components.GPU_3S('g', media.Fuel_CH4(), sep=np.array([1, 0, 1, 1, 1, 1]))
         bad.run_sol()
@@ -283,3 +298,26 @@ def test_mixer_former_T_P_set_all_ports():
         m = flow.Mixer('m', media.Air(), T=400.0, P=3.0)
     assert [f.T for f in (m.F0, m.F1, m.F2)] == [400.0] * 3
     assert [f.P for f in (m.F0, m.F1, m.F2)] == [3.0] * 3
+
+
+def test_gpu_2s_is_gpu_2sv2_with_one_component_removed(syngas_x):
+    a = components.GPU_2S('a', media.Fuel_CH4(), idxSep=4, eff=0.7)
+    b = components.GPU_2SV2('b', media.Fuel_CH4(), Sep=np.array([1, 1, 1, 1, 0, 1]), eff=0.7)
+    for g in (a, b):
+        g.F0.set(n=10.0, Xi=syngas_x, T=320.0, P=5.0)
+        g.run_sol()
+    assert a.F1.n == pytest.approx(b.F1.n) and a.F2.Xi == pytest.approx(b.F2.Xi) and a.W == pytest.approx(b.W)
+    assert a.F2.Xi[4] == pytest.approx(1.0)
+
+
+def test_gpu_empty_outlet_keeps_a_valid_composition():
+    g = components.GPU_2SV2('g', media.Fuel_CH4(), Sep=np.ones(6))       # everything to F1
+    g.run_sol()
+    assert g.F2.n == 0.0 and np.isfinite(g.F2.mw) and g.F2.Xi.sum() == pytest.approx(1.0)
+
+
+def test_gpu_input_checks():
+    with pytest.raises(ValueError, match="Sep"):
+        components.GPU_2SV2('g', media.Fuel_CH4())
+    with pytest.raises(ValueError, match="Sep"):
+        components.GPU_2SV2('g', media.Fuel_CH4(), Sep=np.array([1.5, 1, 1, 1, 0, 1]))

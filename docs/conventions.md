@@ -25,8 +25,9 @@ balance of every unit is therefore
 
 and `unit.energy_balance()` returns the left side minus the right side.
 `unit.heat_and_work()` is what crosses the unit boundary: `Q + W` by default,
-0 for heat exchangers (their `Q` is the duty passed between the two sides) and
-`Q + W + Qloss` for the `SOC`.
+0 for heat exchangers (their `Q` is the duty passed between the two sides),
+`Q + W + Qloss` for the `SOC` and `W + Q_amb` for the black-box separators
+(`GPU_*`), whose work is dissipated to the surroundings.
 
 ## Ports
 
@@ -109,7 +110,7 @@ gives a stand-alone unit a sensible starting point.
 The former state keywords (`F0_n=`, `F0_Xi=`, `F1_T=`, `F1_P=`, ...) are still
 accepted and land on the same flanges, with a `CelesteDeprecationWarning`.
 `SourceM` keeps its `F1_*` arguments: they define the source. `SOC`, `AEL`, `MR`
-and the GPU and FT units have not been migrated yet.
+and the FT units have not been migrated yet.
 
 | Member | Purpose |
 |---|---|

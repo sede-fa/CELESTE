@@ -76,6 +76,10 @@ version may notice.
   connections), so they also work for boxes without sources and sinks and include every unit's heat and work.
   `MBcheck()` now returns in − out like the unit models (was out − in). `connect_seq` always records the
   connection; `store=True` is only needed for the flowsheet graph.
+- GPU models share one base (`GPUbase`): work from the exergy change and `eff`, the work dissipated to the
+  surroundings (`Q_amb`, so the energy balance closes), consistent `Exloss` and `Sgen`. `GPU_2S` is `GPU_2SV2`
+  with one component removed; `GPU_3S` sets the F3 composition to the species marked −1; an empty outlet keeps a
+  valid composition; `Sep` is checked. State keywords as in the other units.
 - `SOC` accepts `T_soc0`, `T_soc1`, `P_soc` in addition to `Tsoc0`, `Tsoc1`.
 
 ### Fixed
@@ -119,6 +123,7 @@ version may notice.
 
 | What | Before | Now | Size of the effect |
 |---|---|---|---|
+| `GPU_*` `Exloss`, `Sgen` | exergy in − exergy out (negative for a separation), ΔS | exergy in + W − exergy out = W − Wid ≥ 0; ΔS − Q_amb/T0, so Exloss = T0·Sgen | GPU rows of `exdest_df` grow by the separation work, e.g. 0.94 kW in `SOECSys` |
 | `SysBase.MBcheck()`, `EBcheck()` | sources and sinks only, `MBcheck` out − in; `EBcheck` from the heater / heat / work tables | boundary streams from the recorded connections, in − out; Σ(Q + W) of every unit | sign of `MBcheck`; `EBcheck` now closes for boxes without sources and sinks (e.g. `SOCsysRecupe`, `CO2Sys`) |
 | `Valve` outlet temperature | equal to the inlet | isenthalpic | none for ideal-gas media; Joule–Thomson cooling for `*_PR` media |
 | Species below a mole fraction of 1e-6 | left out of `cp`, `h`, `s` (a step at 1e-6) | included; entropy term goes smoothly to zero | ≤ 1e-6 × species value, e.g. 6e-6 kJ/mol in `h` |
@@ -152,7 +157,7 @@ These keep working and emit a `CelesteDeprecationWarning`:
 | `HB_Adiabatic(...)` | `HB(..., Q=0)`; outlet pressure `F1_P` → pressure drop `dP` |
 | `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic` | `MeOH(..., model='equilibrium' / 'yield' / 'kinetic', T=...)` |
 | `MeOH_WGS` | `MeOH(..., model='yield', Q=0)` |
-| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P`; `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash`, `Valve`, `Pump` (also their `n`, `Xi`) | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)`, `heater.F1.set(T=...)`, `comp.F1.set(P=...)` |
+| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P`; `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash`, `Valve`, `Pump` (also their `n`, `Xi`), CSL `GPU_*` | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)`, `heater.F1.set(T=...)`, `comp.F1.set(P=...)` |
 | `Recycle_FPI`, `Recycle_Wegstein_q`, `Recycle_Wegstein_Generic`, `Recycle_Wegstein_Generic2`, `Recycle_Steffensen`, `Recycle_Aitken`, `Recycle_Hybrid_FPI_Aitken`, `recycle_solver` | `Recycle_Tear(..., method='direct' / 'wegstein' / 'aitken')`; the wrappers converge the full tear stream, so they may take a different number of passes |
 | `Thermo.updateBoolArr()`, `thermoArr()`, `getCoeffs()` | nothing – handled inside `calcThermoSep()` |
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |

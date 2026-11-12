@@ -181,6 +181,8 @@ def test_system_mass_balance_is_in_minus_out():
     lambda: ComponentModels.SimpleHeaterSys('s', 1.0, None, 300.0, 1.0, 500.0),
     lambda: ComponentModels.Ncomp('train', media.Air()),
     lambda: ElectBox.CO2Sys('box', I=-50.0, Ncells=100),
+    lambda: ElectBox.SOECSys('box', I=-50.0, Ncells=100),     # GPU work dissipated to the surroundings
+    lambda: ElectBox.AELSys('box', n=1.0, Sep=np.array([0, 1, 0, -1])),
     lambda: SOCsystem.SOCBasicSys('s', 1.0, None, 1.0, None, -50.0, 100),
     lambda: SOCsystem.SOCsysRecupe('s', I=-50.0),             # heat exchangers: internal duty only
 ])

@@ -5,354 +5,205 @@ from .. import solvers
 from .._deprecation import deprecated
 
 class GPUbase(ModelBase):
-    def __init__(self, name, eff, args):
-        super().__init__(locals())
-        
-class GPU_1S(GPUbase):
-    """      
-    Black box object where the outlet conditions are prescribed and no reaction is occuring. 
-    One stream is entering and one stream is coming out. 
-    The outlet n, Xi, h, cp, g, s are determined. 
-    The work of the GPU_1S object is calculated for a given efficiency.
-    IMPORTANT: the inlet and outlet temperatures and pressures must be given manually.
-    
-    Parameters:
-        name: objects name
-        Medium1: media of the inlet stream
-        Medium2: media of the outlet stream
-        eff: work efficiency of the GPU_1S. Must be 0 < eff <= 1. Defaults to 1
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium1. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium2. Defaults to None   
-        F0_T: inlet temperature in [K]. Defaults to 298.15 
-        F1_T: outlet temperature in [K]. Defaults to 298.15
-        F0_P: inlet pressure in [bar]. Defaults to 1.0
-        F1_P: outlet pressure in [bar]. Defaults to 1.0 
-    
-    Properties: 
-        Wid: ideal GPU work in [kJ/s]
-        W: real GPU work in [kJ/s]
-
-    Methods: 
-        Eqs: the outlet mol and Xi are determined. Returns: None
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        run_sol: empty method. Returns: the system of equations in the "Eqs" method
-    
-    Notes:  
-        The size of F0_Xi and F1_Xi must be the same.
-        Accept change of phase only for water.   
-        If no composition is given then the object will take the reference composition in the given Medium. For more
-        details go to the interfaces documentation.
-
-    Examples:
-        1) with water change of phase
-        GPU = Components.GPU_1S('GPU_example', Medium1=media.Fuel_CH4(), Medium2=media.Fuel_CH4L(), eff=0.7, F0_n=100, 
-        F0_Xi=np.array([0.1,1e-8,1e-8,1e-8,0.9,1e-8]), F0_T=873.15, F0_P=3.0, F1_T=673.15, F1_P=1.0)
     """
-    def __init__(self, name:str, Medium1:media.Medium_Base, Medium2:media.Medium_Base, eff:float=0, 
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0, 
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=1.0,
-                 ): 
+    Black-box separator ("gas processing unit"): the outlet compositions are prescribed, the work follows
+    from the exergy change and an efficiency.
 
-        super().__init__(name, eff, locals())
+    Shared by all GPU models:
 
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium1, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P) 
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium2, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P) 
-        
-    def Eqs(self)->None:
-        self.F1.n = self.F0.n
-        self.F1.Xi = self.F0.Xi  
-    
+    * ``Wid`` = exergy out - exergy in (ideal work); ``W`` = Wid/eff when work is needed (Wid > 0),
+      Wid*eff when it is recovered; ``eff = 0`` means no work is accounted (W = 0).
+    * The work ends up as heat: ``Q_amb`` = ΔH - W is exchanged with the surroundings at T0 so that the
+      energy balance closes (``heat_and_work()`` = W + Q_amb). It is not reported as process heat.
+    * ``Exloss`` = exergy in + W - exergy out, ``Sgen`` = ΔS - Q_amb/T0, so Exloss = T0·Sgen.
+    """
+    def __init__(self, name, eff, args):
+        params = {k: v for k, v in dict(args).items() if k not in ('self', '__class__', 'legacy')}
+        super().__init__({**params, 'name': name, 'eff': eff})
+
     @property
     def Wid(self):
-        return self.F1.Ex*self.F1.n - self.F0.n*self.F0.Ex
-    
+        return sum(f.n*f.Ex for f in self.outlets) - sum(f.n*f.Ex for f in self.inlets)
+
     @property
     def W(self):
-        if self.eff>0:
-            return float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
-        else:
+        if self.eff == 0:
             return 0.
-    
+        Wid = self.Wid
+        return float(Wid/self.eff if Wid > 0 else Wid*self.eff)
+
+    @property
+    def Q_amb(self):
+        """Heat exchanged with the surroundings at T0 (positive into the unit), kJ/s."""
+        dH = sum(f.n*f.h for f in self.outlets) - sum(f.n*f.h for f in self.inlets)
+        return dH - self.W
+
+    def heat_and_work(self) -> float:
+        return float(self.W + self.Q_amb)
+
     @property
     def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.Ex*self.F1.n #+ self.W
-    
+        return sum(f.n*f.Ex for f in self.inlets) + self.W - sum(f.n*f.Ex for f in self.outlets)
+
     @property
     def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n
-              
-    def run_sol(self):
-        return self.Eqs() 
+        from .exergy import T0
+        dS = sum(f.n*f.s for f in self.outlets) - sum(f.n*f.s for f in self.inlets)
+        return dS - self.Q_amb/T0
 
-class GPU_2S(GPUbase):
+    @staticmethod
+    def _split(n, Xi, frac):
+        """Molar flow and composition of the part ``frac`` (per component) of a stream n, Xi."""
+        flows = n*np.asarray(Xi, dtype=float)*frac
+        total = float(flows.sum())
+        if total >= 1e-10:
+            return total, flows/total
+        w = np.asarray(frac, dtype=float)*(np.asarray(Xi) > 0)   # empty stream: keep a valid composition
+        w = w if w.sum() > 0 else np.asarray(frac, dtype=float)
+        return 0.0, (w/w.sum() if w.sum() > 0 else np.asarray(Xi, dtype=float))
+
+
+class GPU_1S(GPUbase):
     """
-    Black box object where the outlet conditions are prescribed and no reaction is occuring. 
-    One stream is entering (flange F0) and two streams (flanges F1 and F2) are coming out. 
-    For each outlet streams n, Xi, h, cp, g, s, mw are determined. 
-    The work of the GPU_2S object is calculated for a given efficiency.
-    
+    Black box with one inlet and one outlet whose state is prescribed (for example a condenser that
+    changes the medium from gas to liquid water). Flow and composition pass through.
+
     Parameters:
-        name: objects name
-        Medium: media of the streams
-        idxSep: index of the component that goes to the flange F2. Takes one value 0<=idxSep<=(Medium.species.size-1).
-                Defaults to 4 (water index in media.Fuel_CH4())
-        eff: work efficiency of the GPU_2S. Must be 0 < eff <= 1. Defaults to 1
-    
-    Properties: 
-        Wid: ideal GPU work in [kJ/s]
-        W: real GPU work in [kJ/s]
+        name:    objects name
+        Medium1: medium of the inlet (F0)
+        Medium2: medium of the outlet (F1)
+        eff:     efficiency; 0 (default) accounts no work
 
-    Methods: 
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        run_sol: the two outlet mol flows and compositions are determined. Returns: None
+    Operating state: feed on ``F0``; outlet temperature and pressure set on ``F1`` (they are kept).
 
-    Notes:  
-        The size of F0_Xi, F1_Xi and F2_Xi must be the same.
-        If no composition is given then the object will take the reference composition in the given Medium. For more
-        details go to the interfaces documentation.
-
-    Examples:
-        1) Separation of water
-        GPU = Components.GPU_2S('GPU_example', Medium=media.Fuel_CH4(), idxSep=4, eff=0.7)
+    Example:
+        gpu = components.GPU_1S('cond', media.Fuel_CH4(), media.Fuel_CH4L(), eff=0.7)
+        gpu.F0.set(n=100, Xi=np.array([0.1, 1e-8, 1e-8, 1e-8, 0.9, 1e-8]), T=873.15, P=3.0)
+        gpu.F1.set(T=673.15, P=1.0)
+        gpu.run_sol()
     """
-    def __init__(self, name, Medium, idxSep=4, eff=1):
+    def __init__(self, name:str, Medium1:media.Medium_Base, Medium2:media.Medium_Base, eff:float=0, **legacy):
         super().__init__(name, eff, locals())
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium1)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium2)
+        self._init_state(legacy)
 
+    def Eqs(self)->None:
+        self.F1.n = self.F0.n
+        self.F1.Xi = self.F0.Xi
+
+    def run_sol(self):
+        return self.Eqs()
+
+
+class GPU_2SV2(GPUbase):
+    """
+    Black-box separator with one inlet (F0) and two outlets: the fraction ``Sep[i]`` of every component
+    goes to F1, the rest to F2. Both outlets leave at the inlet temperature and pressure.
+
+    Parameters:
+        name:   objects name
+        Medium: medium of all streams
+        Sep:    array (one value 0..1 per species) of the fraction sent to F1
+        eff:    efficiency of the separation work (0 < eff <= 1; 0 accounts no work). Defaults to 1
+
+    Operating state: feed on ``F0``.
+
+    Example (H2, CH4, N2 and parts of CO2 and CO to F1; water to F2):
+        gpu = components.GPU_2SV2('gpu', media.Fuel_CH4(), Sep=np.array([1, 1, 0.5, 0.4, 0, 1]), eff=0.7)
+        gpu.F0.set(n=100, Xi=np.array([0.1, 0.3, 0.05, 0.05, 0.5, 1e-8]), T=873.15, P=3.0)
+        gpu.run_sol()
+    """
+    def __init__(self, name:str, Medium:media.Medium_Base, Sep:npArray[np.float64]|None=None, eff:float=1, **legacy):
+        if Sep is None:
+            raise ValueError(f"{name}: give the split fractions Sep (one value per species)")
+        super().__init__(name, eff, locals())
         self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
         self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
         self.F2 = interfaces.Flange(name + '.F2', Medium=Medium)
-        self.idxSep = idxSep
+        self.Sep = np.asarray(Sep, dtype=float)
+        if self.Sep.shape != (len(Medium.species),) or np.any((self.Sep < 0) | (self.Sep > 1)):
+            raise ValueError(f"{name}: Sep needs one fraction 0..1 per species of {Medium.species}")
         self.Medium = Medium
+        self._init_state(legacy)
 
-        X2 = np.zeros(self.Medium.nX)
-        X2[self.idxSep] = 1.
-        self.F2.Xi = X2
+    def Eqs(self):
+        self.F1.n, self.F1.Xi = self._split(self.F0.n, self.F0.Xi, self.Sep)
+        self.F2.n, self.F2.Xi = self._split(self.F0.n, self.F0.Xi, 1.0 - self.Sep)
+        for f in (self.F1, self.F2):
+            f.P = self.F0.P
+            f.T = self.F0.T
 
     def run_sol(self):
-        self.F2.n = self.F0.Xi[self.idxSep]*self.F0.n
-        self.F1.n = self.F0.n - self.F2.n
-        
-        self.F1.Xi = (self.F0.Xi*self.F0.n - self.F2.Xi*self.F2.n)/self.F1.n 
+        return self.Eqs()
 
-        self.F1.P = self.F0.P
-        self.F2.P = self.F0.P
 
-        self.F1.T = self.F0.T
-        self.F2.T = self.F0.T 
-    
-    @property
-    def Wid(self):
-        return self.F2.n*self.F2.Ex + self.F1.n*self.F1.Ex - self.F0.n*self.F0.Ex
-
-    @property
-    def W(self):
-        return float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
-    
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex
-    
-    @property
-    def Sgen(self):
-        return self.F2.n*self.F2.s + self.F1.n*self.F1.s - self.F0.n*self.F0.s
-
-class GPU_2SV2(GPUbase): 
-    # Important: this is a more general GPU where several components can be separeted and is not fixed to F2 pure water
-    # to change to this from the version above, the Sep array should be given
+class GPU_2S(GPU_2SV2):
     """
-    Black box object where the outlet conditions are prescribed and no reaction is occuring. 
-    One stream is entering (flange F0) and two streams (flanges F1 and F2) are coming out. 
-    For each outlet streams n, Xi, h, cp, g, s, mw are determined. 
-    The work of the GPU_2S object is calculated for a given efficiency.
-    IMPORTANT: the inlet and the two outlet temperatures, pressures must be given manually. 
-    
+    Black-box separator that removes one component completely: species ``idxSep`` goes to F2, everything
+    else to F1 (``GPU_2SV2`` with Sep = 1 except 0 at ``idxSep``).
+
     Parameters:
-        name: objects name
-        Medium: media of the streams
-        Sep: separation ratio of the components that goes to the flange F1. Takes an array of size Medium.species.size. 
-            The individual components values can be a float from 0<=Sep<=1. Defaults to None
-        eff: work efficiency of the GPU_2SV2. Must be 0 < eff <= 1. Defaults to 1
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: flange F1 mol flow in [mol/s]. Defaults to 1.0
-        F2_n: flange F2 mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium. Defaults to None   
-        F1_Xi: flange F1 mol fraction of every component in Medium. Defaults to None  
-        F2_Xi: flange F2 mol fraction of every component in Medium. Defaults to np.array([0.,0.,0.,0.,1.,0.]) 
-        F0_T: inlet temperature in [K]. Defaults to 298.15 
-        F1_T: flange F1 temperature in [K]. Defaults to 298.15
-        F2_T: flange F2 temperature in [K]. Defaults to 298.15
-        F0_P: inlet pressure in [bar]. Defaults to 1.0
-        F1_P: flange F1 pressure in [bar]. Defaults to 1.0
-        F2_P: flange F2 pressure in [bar]. Defaults to 1.0
-    
-    Properties: 
-        Wid: ideal GPU work in [kJ/s]
-        W: real GPU work in [kJ/s]
+        name:   objects name
+        Medium: medium of all streams
+        idxSep: index of the separated species. Defaults to 4 (water in media.Fuel_CH4())
+        eff:    efficiency of the separation work. Defaults to 1
 
-    Methods: 
-        run_sol: the two outlet mol flows and compositions are determined. Returns: None
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-
-    Notes:  
-        The size of F0_Xi, F1_Xi and F2_Xi must be the same.
-        If no composition is given then the object will take the reference composition in the given Medium. For more
-        details go to the interfaces documentation.
-
-    Examples:
-        1) Separation of 100% H2, 100% CH4, 50% CO2, 40% CO, 0% H2O,  100% N2 to the F1. The difference goes to F2
-        GPU = Components.GPU_2SV2('GPU_example', Medium=media.Fuel_CH4(), Sep=np.array([1,1,0.5,0.4,0,1]), eff=0.7, F0_n=100, 
-        F0_Xi=np.array([0.1,0.3,0.05,0.05,0.5,1e-8]), F0_T=873.15, F0_P=3.0, F1_T=673.15, F1_P=1.0, 
-        F2_T=350.15, F2_P=5.0)
+    Example (water removal):
+        gpu = components.GPU_2S('dryer', media.Fuel_CH4(), idxSep=4, eff=0.7)
     """
-    def __init__(self, name:str, Medium:media.Medium_Base, Sep:npArray[np.float64]|None=None, eff:float=1,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0
-                 ):
-        super().__init__(name, eff, locals())
-        
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
-        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium)
-        self.Sep = Sep
-        self.Medium = Medium
-          
-    def run_sol(self):
-        self.F1.n = np.sum(self.F0.n*self.F0.Xi*self.Sep)
-        self.F1.Xi = self.F0.n*self.F0.Xi*self.Sep/self.F1.n if self.F1.n >=1e-10 else np.zeros(self.F0.Xi.size)
-        self.F2.n = np.sum(self.F0.n*self.F0.Xi*(np.ones(self.Medium.nX) - self.Sep))
-        self.F2.Xi =  self.F0.n*self.F0.Xi*(np.ones(self.Medium.nX) - self.Sep)/self.F2.n if self.F2.n >=1e-10 else np.zeros(self.F0.Xi.size)
+    def __init__(self, name, Medium, idxSep=4, eff=1, **legacy):
+        Sep = np.ones(len(Medium.species))
+        Sep[idxSep] = 0.0
+        super().__init__(name, Medium, Sep=Sep, eff=eff, **legacy)
+        self.idxSep = idxSep
 
-        self.F1.P = self.F0.P
-        self.F2.P = self.F0.P
-
-        self.F1.T = self.F0.T
-        self.F2.T = self.F0.T 
-        
-    @property
-    def Wid(self):
-        return (self.F2.n*self.F2.Ex + self.F1.n*self.F1.Ex) - self.F0.n*self.F0.Ex
-    
-    @property
-    def W(self):
-        if self.eff==0.:
-            return 0.
-        else:
-            return float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
-    
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex
-    
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n + self.F2.s*self.F2.n - self.F0.s*self.F0.n
 
 class GPU_3S(GPUbase):
     """
-    Black box object where the outlet conditions are prescribed and no reaction is occuring. 
-    One stream is entering (flange F0) and three streams (flanges F1, F2 and F3) are coming out. 
-    For each outlet streams n, Xi, h, cp, g, s, mw are determined. 
-    The work of the GPU_3S object is calculated for a given efficiency.
-    IMPORTANT: the inlet and the three outlet temperatures, pressures, and the composition of the flange F3 
-    must be given manually.
-    
-    Parameters:
-        name: objects name
-        Medium: media of the streams
-        sep: separation ratio. Could hold any value between 0 and 1, and also -1. A value must be given for the each component in Medium,
-            The fraction given goes to the flange F1, the difference goes to the flange F2. The flange F3 has only water and the value 
-            must be equals to -1. Defaults to None.
-            IMPORTANT -1 could only be assigned to one component. 
-        eff: work efficiency of the GPU_3S. Must be 0 < eff <= 1. Defaults to 1
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: flange F1 mol flow in [mol/s]. Defaults to 1.0
-        F2_n: flange F2 mol flow in [mol/s]. Defaults to 1.0
-        F3_n: flange F3 mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium. Defaults to None   
-        F1_Xi: flange F1 mol fraction of every component in Medium. Defaults to None  
-        F2_Xi: flange F2 mol fraction of every component in Medium. Defaults to None
-        F3_Xi: flange F3 mol fraction of every component in Medium. Defaults to np.array([0.,0.,0.,0.,1.,0.]) 
-        F0_T: inlet temperature in [K]. Defaults to 298.15 
-        F1_T: flange F1 temperature in [K]. Defaults to 298.15
-        F2_T: flange F2 temperature in [K]. Defaults to 298.15
-        F3_T: flange F3 temperature in [K]. Defaults to 298.15
-        F0_P: inlet pressure in [bar]. Defaults to 1.0
-        F1_P: flange F1 pressure in [bar]. Defaults to 1.0
-        F2_P: flange F2 pressure in [bar]. Defaults to 1.0
-        F3_P: flange F3 pressure in [bar]. Defaults to 1.0
-    
-    Attributes: 
-        Eq: equation to be solved
-        Wid: ideal GPU work in [kJ/s]
-        W: real GPU work in [kJ/s]
+    Black-box separator with one inlet (F0) and three outlets. The species marked -1 in ``sep`` goes
+    entirely to F3; of every other species the fraction ``sep[i]`` goes to F1 and the rest to F2.
 
-    Methods: 
-        Eqs: the three outlet mol flows and, the flanges F1 and F2 composition are determined. Returns: "Eq" attribute
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        f_sol: contains the variable to be optimized by the solver. Return: the "Eqs" method
-        run_sol: contains the optimizer function and guesses values. Returns: the solution of the optimization
-    
-    Notes:  
-        The size of F0_Xi, F1_Xi, F2_Xi and F3_Xi must be the same.
-        If no composition is given then the object will take the reference composition in the given Medium. For more
-        details go to the interfaces documentation.
-    
-    Examples:
-        1) Separation of H2 to flange F1, CH4 to flange F2 and water to flange F3
-        GPU = Components.GPU_3S('GPU_example', Medium=media.Fuel_CH4(), sep=np.array([1,0,1,1,-1,1]), eff=0.7, F0_n=100, 
-        F0_Xi=np.array([0.1,0.1, 1e-8,1e-8,0.8,1e-8]), F0_T=873.15, F0_P=3.0, F1_T=673.15, F1_P=1.0, 
-        F2_T=350.15, F2_P=5.0, F3_Xi=np.array([0.,0.,0.,0.,1.,0.]), F3_T=673.15, F3_P=1.0,)
-        
-        2) how sep works --> if the value given for a specific component is equals to 0.9:
-        0.9 of this component goes to flange F1
-        (1 - 0.9)=0.1 of this component goes to flange F2
-        -1: completely goes to flange F3
+    Parameters:
+        name:   objects name
+        Medium: medium of all streams
+        sep:    array, one value per species: 0..1 (fraction to F1) or -1 (exactly one species, to F3)
+        eff:    efficiency of the separation work. Defaults to 1
+
+    Operating state: feed on ``F0``; outlet temperatures and pressures set on F1, F2, F3 (they are kept).
+
+    Example (H2 to F1, CH4 to F2, water to F3):
+        gpu = components.GPU_3S('gpu', media.Fuel_CH4(), sep=np.array([1, 0, 1, 1, -1, 1]), eff=0.7)
+        gpu.F0.set(n=100, Xi=np.array([0.1, 0.1, 1e-8, 1e-8, 0.8, 1e-8]), T=873.15, P=3.0)
+        gpu.F1.set(T=673.15, P=1.0)
+        gpu.run_sol()
     """
     def __init__(self, name:str, Medium:media.Medium_Base, sep:npArray[np.float64]|None=None, eff:float=1.,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0, 
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=1.0,
-                 F2_n:float=1.0, F2_Xi:npArray[np.float64]|None=None, F2_T:float=298.15, F2_P:float=1.0, 
-                 F3_n:float=1.0, F3_Xi:npArray[np.float64]|None=np.array([0.,0.,0.,0.,1.,0.]), F3_T:float=298.15, F3_P:float=1.0, 
-                ):       
+                 **legacy):
         super().__init__(name, eff, locals())
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P) 
-        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium, n=F2_n, Xi=F2_Xi, T=F2_T, P=F2_P) 
-        self.F3 = interfaces.Flange(name + '.F3', Medium=Medium, n=F3_n, Xi=F3_Xi, T=F3_T, P=F3_P) 
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium)
+        self.F3 = interfaces.Flange(name + '.F3', Medium=Medium)
         self.Medium = Medium
         self.sep = sep
-        
+        legacy.pop('F3_Xi', None)                 # F3 is always the pure species marked -1
+        self._init_state(legacy)
+
     def Eqs(self):
         sep = np.asarray(self.sep, dtype=float)
         idx = np.flatnonzero(sep == -1)
         if idx.size != 1:
             raise ValueError(f"{self.name}: 'sep' must mark exactly one component with -1 (the one sent to F3), got {sep}")
-        sep1 = np.where(sep >= 0, sep, 0)
-        self.F3.n = float(self.F0.n*self.F0.Xi[idx[0]])
-        self.F1.n = np.sum(self.F0.n*self.F0.Xi*sep1)
-        self.F1.Xi = self.F0.n*self.F0.Xi*sep1/self.F1.n
-        self.F2.n = self.F0.n - self.F1.n - self.F3.n
-        self.F2.Xi = (self.F0.n*self.F0.Xi - (self.F1.n*self.F1.Xi + self.F3.n*self.F3.Xi))/self.F2.n     
-    
-    @property
-    def Wid(self):
-        return (self.F3.Ex*self.F3.n + self.F2.n*self.F2.Ex + self.F1.n*self.F1.Ex) - self.F0.n*self.F0.Ex
+        pure = np.zeros(sep.size); pure[idx[0]] = 1.0
+        self.F3.n, self.F3.Xi = float(self.F0.n*self.F0.Xi[idx[0]]), pure
+        frac1 = np.where(sep >= 0, sep, 0.0)
+        self.F1.n, self.F1.Xi = self._split(self.F0.n, self.F0.Xi, frac1)
+        self.F2.n, self.F2.Xi = self._split(self.F0.n, self.F0.Xi, np.where(sep >= 0, 1.0 - sep, 0.0))
 
-    @property
-    def W(self):
-        return float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
-    
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex - self.F3.n*self.F3.Ex
-    
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n + self.F2.s*self.F2.n + self.F3.s*self.F3.n - self.F0.s*self.F0.n
-    
     def run_sol(self):
         return self.Eqs()
+
 
 class Compressor(ModelBase):
     """
