@@ -21,6 +21,8 @@ version may notice.
   close by construction; energy specification `T` (isothermal) or `Q` (`Q=0` adiabatic)
 - **`CSL.reactors.HB`** – one Haber–Bosch model for isothermal, adiabatic and cooled operation (kinetics of the
   former `HB_Adiabatic`); **`HB_1D`** – plug-flow bed integrated along its volume (profiles in `.profile`)
+- **`CSL.reactors.MeOH`** – one methanol reactor: `model='equilibrium' | 'yield' | 'kinetic'`, isothermal,
+  adiabatic or with a given duty (replaces `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic`, `MeOH_WGS`)
 - `Flange.set(n=, Xi=, T=, P=)`
 - **`celeste.HEN.HENSynthesiser`** – heat exchanger network synthesis from the pinch stream table
 - **`CSL.systems.ProcessBoxes`** – `CondenserBox`, `MethanolLoop`
@@ -109,6 +111,7 @@ version may notice.
 | FT `RStoic.Q` | flow squared | enthalpy balance | any use of `RStoic.Q` or its `ExBs()` |
 | Equilibrium constants | empirical fits: linear Gibbs fit (MR, SOC, MeOH_WGS, Reformer with 32.115), Graaf (MeOH_Equil, MeOH_Yield) | from the NASA Gibbs energies, consistent with `h`, `s` | WGS at 450 K: 257 → 399 (fit), 378 → 399 (Graaf); within 0.6 % at SOC temperatures. Methanol loop carbon efficiency 0.9002 → 0.9087 |
 | `HB` (isothermal) | Nielsen constants of the original `HB`, outlet at the inlet temperature | constants of `HB_Adiabatic` (one rate law); isothermal at `T` | test case NH3 0.3658 → 0.3677 |
+| Isothermal methanol reactors | outlet at the inlet temperature (constructor `T` set both) | at the specified `T` | only when the feed temperature differs from `T` in a system |
 | Reactor and SOC results | – | same roots, solver tolerance tighter | relative 1e-6 or smaller |
 
 The reference values of the original implementation are stored in
@@ -122,6 +125,8 @@ These keep working and emit a `CelesteDeprecationWarning`:
 | Name | Use instead |
 |---|---|
 | `HB_Adiabatic(...)` | `HB(..., Q=0)`; outlet pressure `F1_P` → pressure drop `dP` |
+| `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic` | `MeOH(..., model='equilibrium' / 'yield' / 'kinetic', T=...)` |
+| `MeOH_WGS` | `MeOH(..., model='yield', Q=0)` |
 | state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, reactor `P`; outlet guesses `F1_n`, `F1_Xi` are ignored) | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)` |
 | `Thermo.updateBoolArr()`, `thermoArr()`, `getCoeffs()` | nothing – handled inside `calcThermoSep()` |
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |

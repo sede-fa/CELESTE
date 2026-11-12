@@ -101,41 +101,68 @@ def test_haber_bosch_plug_flow_bed():
     assert cooled.Exloss > 0
 
 
-@pytest.mark.parametrize('cls, x_ref', [
-    (reactors.MeOH_Equil, [0.6342, 0.0660, 0.0965, 0.0073, 0.0356, 0.0, 0.1604]),
-    (reactors.MeOH_Yield, [0.7017, 0.0581, 0.1087, 0.0425, 0.0076, 0.0, 0.0814]),
+def _meoh(**kw):
+    r = reactors.MeOH('r', **kw)
+    r.F0.set(n=100, Xi=MEOH_FEED, T=473.15, P=50.0)
+    return r
+
+
+@pytest.mark.parametrize('kw, x_ref', [
+    (dict(model='equilibrium', T=473.15), [0.6342, 0.0660, 0.0965, 0.0073, 0.0356, 0.0, 0.1604]),
+    (dict(model='yield', T=473.15), [0.7017, 0.0581, 0.1087, 0.0425, 0.0076, 0.0, 0.0814]),
+    (dict(model='yield', Q=0.0), [0.6674, 0.0581, 0.0744, 0.0768, 0.0419, 0.0, 0.0814]),   # former MeOH_WGS
 ])
-def test_methanol_isothermal_reactors(cls, x_ref):
-    r = cls('r', F0_n=100, F0_Xi=MEOH_FEED)
+def test_methanol_reactor(kw, x_ref):
+    r = _meoh(**kw)
     sol = r.run_sol()
     assert sol.success
     np.testing.assert_allclose(r.F1.Xi, x_ref, atol=5e-5)
     assert_elements_conserved(r); assert_physical(r.F1)
-    assert r.Q < 0 and r.Exloss > 0 and 0 < r.Exeff < 1          # available without calling ExBs()
-    from celeste._deprecation import CelesteDeprecationWarning
-    with pytest.warns(CelesteDeprecationWarning):
-        r.ExBs()
+    assert r.Exloss > 0 and 0 < r.Exeff < 1 and r.Sgen > 0
+    if 'T' in kw:
+        assert r.F1.T == kw['T'] and r.Q < 0
+    else:
+        assert r.Q == pytest.approx(0.0, abs=1e-6) and r.F1.T == pytest.approx(650.648, abs=5e-3)
+    assert set(r.conversion) == {'H2 Conversion', 'CO2 Conversion', 'Carbon Conversion'}
+
+
+def test_methanol_equilibrium_satisfies_both_mass_action_laws():
+    r = _meoh(model='equilibrium', Q=0.0)
+    assert r.run_sol().success
+    x, T, P = r.F1.Xi, r.F1.T, r.F1.P
+    assert x[6]*x[4]/(x[2]*x[0]**3*P**2) == pytest.approx(equilibrium.K_MeOH_CO2(T), rel=1e-6)
+    assert x[3]*x[4]/(x[2]*x[0]) == pytest.approx(equilibrium.K_rWGS(T), rel=1e-6)
+    assert 473.15 < T < 650.0 and r.Q == pytest.approx(0.0, abs=1e-6)
 
 
 def test_methanol_kinetic_reactor_returns_a_physical_state():
     """The unbounded solve used to converge to negative water and methanol fractions."""
-    r = reactors.MeOH_Kinetic('r', M_cat=1000, F0_n=100, F0_Xi=MEOH_FEED)
-    sol = r.run_sol()
-    assert sol.success
+    r = _meoh(model='kinetic', M_cat=1000, T=473.15)
+    assert r.run_sol().success
     assert_physical(r.F1); assert_elements_conserved(r)
     assert r.F1.Xi[6] > 0.005 and r.F1.Xi[4] > 0.0
     k_b = r._K_b
     r.T = 500.0
     assert r._K_b != k_b                                           # adsorption constants follow the temperature
+    big = _meoh(model='kinetic', M_cat=1e5, T=473.15)              # a large bed approaches equilibrium
+    big.run_sol()
+    eq_ = _meoh(model='equilibrium', T=473.15)
+    eq_.run_sol()
+    assert eq_.F1.Xi[6] > big.F1.Xi[6] > r.F1.Xi[6]
+    adiabatic = _meoh(model='kinetic', M_cat=1000, Q=0.0)          # ignited steady state
+    assert adiabatic.run_sol().success and adiabatic.F1.T > 540.0
 
 
-def test_methanol_adiabatic_reactor():
-    r = reactors.MeOH_WGS('r', F0_n=100, F0_Xi=MEOH_FEED)
-    assert r.run_sol().success
-    np.testing.assert_allclose(r.F1.Xi, [0.6674, 0.0581, 0.0744, 0.0768, 0.0419, 0.0, 0.0814], atol=5e-5)
-    assert r.F1.T == pytest.approx(650.648, abs=5e-3) and r.Q == pytest.approx(0.0, abs=1e-5)
-    assert_elements_conserved(r)
-    assert set(r.conversion) == {'H2 Conversion', 'CO2 Conversion', 'Carbon Conversion'}
+def test_methanol_former_classes():
+    from celeste._deprecation import CelesteDeprecationWarning
+    for cls, kw in [(reactors.MeOH_Equil, {}), (reactors.MeOH_Yield, {}), (reactors.MeOH_Kinetic, dict(M_cat=1000)),
+                    (reactors.MeOH_WGS, {})]:
+        with pytest.warns(CelesteDeprecationWarning):
+            r = cls('r', F0_n=100, F0_Xi=MEOH_FEED, **kw)
+        assert isinstance(r, reactors.MeOH) and r.run_sol().success
+    assert r.F1.T == pytest.approx(650.648, abs=5e-3)                  # MeOH_WGS is adiabatic
+    with pytest.warns(CelesteDeprecationWarning):
+        r.ExBs()
 
 
 def test_reformer():

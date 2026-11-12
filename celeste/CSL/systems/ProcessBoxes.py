@@ -72,7 +72,7 @@ class MethanolLoop(SysBase):
         T_reac:   reactor temperature [K];  P: loop pressure [bar]
         T_cond:   condensation temperature [K]
         purge:    fraction of the drum gas that is purged [-]
-        reactor:  'equilibrium' (reactors.MeOH_Equil) or 'yield' (reactors.MeOH_Yield)
+        reactor:  model of the isothermal reactors.MeOH: 'equilibrium' or 'yield'
         Yield:    per-pass methanol yield for reactor='yield'
 
     Solve with ``run_sol()``; results: ``carbon_efficiency``, ``recycle_ratio``,
@@ -87,12 +87,10 @@ class MethanolLoop(SysBase):
         self.feed = flow.SourceM(name + '.feed', gas, F1_n=n_feed, F1_Xi=np.asarray(X_feed, dtype=float), F1_T=T_feed, F1_P=P)
         self.mix = flow.Mixer(name + '.mix', gas, F1_n=1e-6*n_feed, F1_Xi=np.asarray(X_feed, dtype=float), T=T_feed, P=P)
         self.preheat = heat.Heater(name + '.preheat', gas, gas, F1_T=T_reac, F1_P=P)
-        if reactor == 'equilibrium':
-            self.reactor = reactors.MeOH_Equil(name + '.reactor', gas, T=T_reac, P=P)
-        elif reactor == 'yield':
-            self.reactor = reactors.MeOH_Yield(name + '.reactor', gas, Yield=Yield, T=T_reac, P=P)
-        else:
+        if reactor not in ('equilibrium', 'yield'):
             raise ValueError("reactor must be 'equilibrium' or 'yield'")
+        self.reactor = reactors.MeOH(name + '.reactor', gas, model=reactor, Yield=Yield, T=T_reac)
+        self.reactor.F0.set(T=T_reac, P=P)
         self.cond = CondenserBox(name + '.cond', gas, T_cond=T_cond)
         self.split = flow.Splitter(name + '.split', gas, Split=1.0 - purge)
         self.purge_out = flow.Sink(name + '.purge_out', gas)

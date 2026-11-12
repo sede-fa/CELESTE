@@ -5,10 +5,8 @@ Reactors models
 2) MR:            Methanation / steam reforming + water-gas shift at equilibrium
 3) ExtentReactor: Base for reactors solved for their reaction extents (isothermal, adiabatic or given Q)
 4) HB:            Haber-Bosch, kinetic (HB_Adiabatic: former adiabatic class, now HB(..., Q=0)); HB_1D: plug-flow bed
-5) MeOH_Equil:    Methanol synthesis at equilibrium
-6) MeOH_Yield:    Methanol synthesis with a given yield, rWGS at equilibrium
-7) MeOH_Kinetic:  Methanol synthesis, kinetic (Van den Bussche & Froment)
-8) MeOH_WGS:      Adiabatic methanol synthesis with a given yield, WGS at equilibrium
+5) MeOH:         Methanol synthesis: equilibrium, yield or kinetic (Van den Bussche & Froment); isothermal,
+                  adiabatic or given Q. Former classes MeOH_Equil, MeOH_Yield, MeOH_Kinetic, MeOH_WGS are wrappers
 9) Reformer:      Kinetic propane / methane steam reformer (CSTR), Reformer_1D: series of them
 """
 
@@ -321,8 +319,31 @@ class ExtentReactor(ModelBase):
                 res = solvers.solve_scalar(g, grid[k], grid[k + 1], tol=1e-8, name=self.name)
                 self.f_sol(res.x)
                 return self._check_energy(res)
-        x0 = np.clip(self.initial_extents(lo, hi), lo_b, hi_b)
-        return self._check_energy(solvers.solve(self.f_sol, x0, bounds=(lo_b, hi_b), scale=1.0, name=self.name))
+        starts = [np.clip(self.initial_extents(lo, hi), lo_b, hi_b)]
+        if not self.isothermal:
+            # starting points from isothermal solutions at and above the inlet temperature (continuation);
+            # of several steady states the one with the largest first extent is returned
+            spec = self.Q_spec
+            for dT in (0.0, 50.0, 100.0, 200.0):
+                self.Q_spec, self.T_spec = None, self.F0.T + dT
+                iso = solvers.solve(self.f_sol, starts[0], bounds=(lo_b, hi_b), scale=1.0, name=self.name, warn=False)
+                if iso.success:
+                    starts.append(np.clip(iso.x, lo_b, hi_b))
+            self.Q_spec, self.T_spec = spec, None
+        best = None
+        for x0 in starts:
+            res = solvers.solve(self.f_sol, x0, bounds=(lo_b, hi_b), scale=1.0, name=self.name, warn=False)
+            if best is None or (res.success and (not best.success or res.x[0] > best.x[0] + 1e-9*self.F0.n)) \
+                    or (not best.success and res.residual_norm < best.residual_norm):
+                best = res
+            if res.success and self.isothermal:
+                break
+        self.f_sol(best.x)
+        if not best.success:
+            import warnings
+            warnings.warn(f"{self.name}: not converged (max |residual| = {best.residual_norm:.3e})",
+                          solvers.ConvergenceWarning, stacklevel=2)
+        return self._check_energy(best)
 
     def _check_energy(self, res):
         if not self.isothermal:
@@ -558,459 +579,169 @@ class HB_1D(ModelBase):
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.T_wall
 
 
-class MeOH_Equil(EquilBase):
+class MeOH(ExtentReactor):
     """
-    Equilibrium isothermal methanol synthesis reactor.
-    Two reactions are considered to reach equilibrium:
-        1) CO2 + 3H2 <-> CH3OH + H2O
-        2) CO2 + H2 <-> CO + H2O
-    
-    Parameters:
-        name: object's name
-        Medium: media of the inlet stream. Defaults to media.Fuel_MeOH()
-        T: temperature in [K]. Defaults to 473.15 
-        P: pressure in [bar]. Defaults to 50.0
-        Q: heat released/absorbed in [kJ/s]. Defaults to 0.0 
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium1. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium2. Defaults to None   
-    
-    Attributes: 
-        Eq: equation to be solved
-        m0: inlet mass flow in [g/s]
-        m1: outlet mass flow in [g/s]
-        F0.Ex: float - inlet exergy flow in [kJ/s]
-        F1.Ex: float - outlet exergy flow in [kJ/s]
-        Exth: thermal exergy of the object in [kJ/s]
-        Exloss: exergy loss in the object in [kJ/s]
-        Exeff: exergy efficiency of the object. It goes between 0 and 1 
+    Methanol synthesis reactor with two reactions:
 
-    Methods: 
-        Eqs: the outlet mol and Xi are determined. Returns: None
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        ExBs: calls the exergy method on each flange. The ideal and real work are calculated. Returns: None
-        run_sol: empty method. Returns: the system of equations in the "Eqs" method
-    
+        1) CO2 + 3 H2 <-> CH3OH + H2O      (extent xi[0])
+        2) CO2 +   H2 <-> CO    + H2O      (reverse water-gas shift, extent xi[1])
+
+    CO hydrogenation (CO + 2 H2 -> CH3OH) is the sum of both and needs no extra extent.
+
+    Parameters (design):
+        Medium: medium with H2, CO2, CO, H2O, CH3OH (media.Fuel_MeOH(); CH4 and N2 are inert)
+        model:  'equilibrium' - both reactions at equilibrium (NASA Gibbs energies)
+                'yield'       - methanol formed = Yield x (CO + CO2) of the feed, shift at equilibrium
+                'kinetic'     - Van den Bussche & Froment (1996) rates over ``M_cat`` kg of catalyst
+        Yield:  per-pass methanol yield for model='yield' [-]
+        M_cat:  catalyst mass for model='kinetic' [kg]
+        T, Q:   energy specification: T isothermal, Q heat added (Q=0 adiabatic), neither: inlet temperature
+        dP:     pressure drop [bar]
+
+    Inlet state: ``reactor.F0.set(n=..., Xi=..., T=..., P=...)``; stand-alone default
+    0.75 H2 / 0.05 CH4 / 0.1 CO2 / 0.1 CO at 473.15 K and 50 bar.
+
+    Properties: Q, xi, conversion (H2, CO2, carbon), Exloss, Exeff, Sgen
+
     Notes:
-        Reference: Graaf 1985 "Chemical Equilibria in Methanol Synthesis"
-    
-    Examples:
-        MeOH_Equilibrium = MeOH_Equil.Reactors('MeOH_example', Medium=media.Fuel_MeOH(), F0_n=100, 
-        F0_Xi=np.array([0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8]), T=473.15, P=50.0)
-         
+        Equilibrium constants: celeste.CSL.equilibrium (NASA Gibbs energies). The kinetic model keeps
+        the equilibrium constants it was fitted with (Graaf et al., 1986) inside its rate expressions.
     """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_MeOH(), 
-                 T:float=473.15, P:float=50.0, Q:float=0.0,
-                 F0_n:float=1.0, F0_Xi=None, #F0_Xi:npArray[np.float64]|None=None, 
-                 F1_n:float=1.0, F1_Xi=None #F1_Xi:npArray[np.float64]|None=None,
-                ):
-        
-        super().__init__(name, Medium=Medium, T=T, P=P, F0_n=F0_n, F0_Xi=F0_Xi, F1_n=F1_n, F1_Xi=F1_Xi, Q=Q)   
-        self._N_H = np.array([2,4,0,0,2,0,4])
-        self._N_C = np.array([0,1,1,1,0,0,1])
-        self._N_O = np.array([0,0,2,1,1,0,1])
-        self._N_N = np.array([0,0,0,0,0,2,0])
-        
-    def Eqs(self):
+    reactions = {'MeOH': {'CO2': -1.0, 'H2': -3.0, 'CH3OH': 1.0, 'H2O': 1.0},
+                 'rWGS': {'CO2': -1.0, 'H2': -1.0, 'CO': 1.0, 'H2O': 1.0}}
+    _inlet_state = {'F0': dict(n=1.0, Xi=[0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8], T=473.15, P=50.0)}
+    R = 8.314462618     # J/mol/K (kinetics)
+    _MODELS = ('equilibrium', 'yield', 'kinetic')
 
-        self.F1.P = self.F0.P
-        self.F1.T = self.F0.T 
+    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_MeOH(), model:str='equilibrium',
+                 Yield:float=0.35, M_cat:float|None=None, T:float|None=None, Q:float|None=None, dP:float=0.0,
+                 **legacy):
+        if model not in self._MODELS:
+            raise ValueError(f"model must be one of {self._MODELS}")
+        if model == 'kinetic' and M_cat is None:
+            raise ValueError("model='kinetic' needs the catalyst mass M_cat [kg]")
+        P_legacy = legacy.pop('P', None)
+        legacy.pop('F1_n', None); legacy.pop('F1_Xi', None)
+        super().__init__(name, Medium, T=T, Q=Q, dP=dP)
+        self.model, self.Yield, self.M_cat = model, Yield, M_cat
+        sp = [str(s) for s in Medium.species]
+        self._i = {k: sp.index(k) for k in ('H2', 'CO2', 'CO', 'H2O', 'CH3OH')}
+        if P_legacy is not None:
+            legacy.setdefault('F0_P', P_legacy)
+        self._init_state(legacy)
+        if T is not None and 'F0_T' not in legacy:
+            self.F0.T = T
+        self.F1.set(n=self.F0.n, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
 
-        self.Eq:npArray[np.float64] = np.array([
-            # MB
-            self.F0.n*(np.dot(self.F0.Xi, self._N_C)) - self.F1.n*(np.dot(self.F1.Xi, self._N_C)), # C balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_H)) - self.F1.n*(np.dot(self.F1.Xi, self._N_H)), # H balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_O)) - self.F1.n*(np.dot(self.F1.Xi, self._N_O)), # O balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_N)) - self.F1.n*(np.dot(self.F1.Xi, self._N_N)), # N balance
-            self.F0.n*self.F0.Xi[1] - self.F1.n*self.F1.Xi[1], # CH4
-            1 - np.sum(self.F1.Xi), 
-            # Equil
-            self.F1.Xi[0]*self.F1.Xi[2]*self.K_rWGS() - (self.F1.Xi[3]*self.F1.Xi[4]), 
-            self.F1.Xi[0]**3*self.F1.Xi[2]*self.P**2*self.K_MeOH() - (self.F1.Xi[6]*self.F1.Xi[4]), # for CO2
-            #(self.F1.Xi[0]**2*self.F1.Xi[3]*self.P**2*self.K_MeOH()) - self.F1.Xi[6] # for CO   
-        ])
+    # ---- relations per model ----------------------------------------------------------------------
+    def rate_residuals(self, xi, T, P, x):
+        i = self._i
+        ln = lambda k: np.log(x[i[k]])
+        eq_shift = ln('CO') + ln('H2O') - ln('CO2') - ln('H2') - np.log(eq.K_rWGS(T))
+        if self.model == 'equilibrium':
+            eq_meoh = ln('CH3OH') + ln('H2O') - ln('CO2') - 3*ln('H2') - 2*np.log(P) - np.log(eq.K_MeOH_CO2(T))
+            return np.array([eq_meoh, eq_shift])
+        if self.model == 'yield':
+            n0 = self.F0.n*np.asarray(self.F0.Xi, dtype=float)
+            target = self.Yield*(n0[i['CO2']] + n0[i['CO']])
+            return np.array([(xi[0] - target)/self.F0.n, eq_shift])
+        r_meoh, r_rwgs = self.rates(T, P, x)
+        return np.array([xi[0] - r_meoh*self.M_cat, xi[1] - r_rwgs*self.M_cat])/self.F0.n
 
-        self.Q = (self.F1.n*self.F1.h - self.F0.n*self.F0.h )  
+    def initial_extents(self, lo, hi):
+        if self.model == 'yield':
+            n0 = self.F0.n*np.asarray(self.F0.Xi, dtype=float)
+            x1 = self.Yield*(n0[self._i['CO2']] + n0[self._i['CO']])
+            return np.array([x1, 0.0])
+        return np.array([0.1*hi[0], 0.0])
 
-        self.F0_n = self.F0.n
-        self.F0_Xi = self.F0.Xi
-        self.F1_n = self.F1.n
-        self.F1_Xi = self.F1.Xi
-
-        return self.Eq
-    
-    def K_rWGS(self):
-        return eq.K_rWGS(self.F1.T)
-
-    def K_MeOH(self):
-        return eq.K_MeOH_CO2(self.F1.T) # for CO2
-
-    def MBcheck(self)->float:
-        """Print the relative mass balance error and return out - in, g/s."""
-        self.m0:float = self.F0.n*self.F0.mw
-        self.m1:float = self.F1.n*self.F1.mw
-        MB:float = self.m1 - self.m0
-        print(f"{(self.F1.n*self.F1.mw/(self.F0.n*self.F0.mw) - 1)*100}% difference")
-        return MB
-    
-    def f_sol(self, x):
-        self.F1.n = x[0]
-        self.F1.Xi = x[1:8]
-        return self.Eqs()
-        
-    def run_sol(self):
-        x0 = np.concatenate(([self.F0.n], media.Fuel_MeOH._default_Xi))
-        return self._solve_composition(self.f_sol, x0)
-
-class MeOH_Yield(EquilBase):
-    """
-    Methanol synthesis isothermal reactor where the methanol yield is given and the rWGS reaction is in equilibrium 
-    Two reactions are considered:
-        1) CO2 + 3H2 <-> CH3OH + H2O (yield)
-        2) CO2 + H2 <-> CO + H2O (equilibrium) 
-    
-    Parameters:
-        name: object's name
-        Medium: media of the inlet stream. Defaults to media.Fuel_MeOH()
-        Yield: methanol yield. Its goes from 0 to 1. Defaults to 0.35
-        T: temperature in [K]. Defaults to 473.15 
-        P: pressure in [bar]. Defaults to 50.0
-        Q: heat released/absorbed in [kJ/s]. Defaults to 0.0 
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium1. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium2. Defaults to None   
-    
-    Attributes: 
-        Eq: equation to be solved
-        m0: inlet mass flow in [g/s]
-        m1: outlet mass flow in [g/s]
-        F0.Ex: float - inlet exergy flow in [kJ/s]
-        F1.Ex: float - outlet exergy flow in [kJ/s]
-        Exth: thermal exergy of the object in [kJ/s]
-        Exloss: exergy loss in the object in [kJ/s]
-        Exeff: exergy efficiency of the object. It goes between 0 and 1 
-
-    Methods: 
-        Eqs: the outlet mol and Xi are determined. Returns: None
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        ExBs: calls the exergy method on each flange. The ideal and real work are calculated. Returns: None
-        run_sol: empty method. Returns: the system of equations in the "Eqs" method
-    
-    Notes:
-        Reference: Graaf 1985 "Chemical Equilibria in Methanol Synthesis"
-    
-    Examples:
-        MeOH_Yield = MeOH_yield.Reactors('MeOH_example', Medium=media.Fuel_MeOH(), Yield=0.33, F0_n=100, 
-        F0_Xi=np.array([0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8]), T=473.15, P=50.0)
-    
-    """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_MeOH(), 
-                 Yield:float=0.35, T:float=473.15, P:float=50.0, Q:float=0.0,
-                 F0_n:float=1.0, F0_Xi=None,  #F0_Xi:npArray[np.float64]|None=None, 
-                 F1_n:float=1.0, F1_Xi=None #F1_Xi:npArray[np.float64]|None=None
-                 ):
-        
-        super().__init__(name, Medium=Medium, T=T, P=P, F0_n=F0_n, F0_Xi=F0_Xi, F1_n=F1_n, F1_Xi=F1_Xi, Q=Q)   
-        self._N_H = np.array([2,4,0,0,2,0,4])
-        self._N_C = np.array([0,1,1,1,0,0,1])
-        self._N_O = np.array([0,0,2,1,1,0,1])
-        self._N_N = np.array([0,0,0,0,0,2,0])
-        self.Yield = Yield
-        
-    def Eqs(self):
-
-        self.F1.P = self.F0.P
-        self.F1.T = self.F0.T
-        
-        self.Eq:npArray[np.float64] = np.array([
-            # MB
-            self.F0.n*(np.dot(self.F0.Xi, self._N_C)) - self.F1.n*(np.dot(self.F1.Xi, self._N_C)), # C balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_H)) - self.F1.n*(np.dot(self.F1.Xi, self._N_H)), # H balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_O)) - self.F1.n*(np.dot(self.F1.Xi, self._N_O)), # O balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_N)) - self.F1.n*(np.dot(self.F1.Xi, self._N_N)), # N balance
-            self.F0.n*self.F0.Xi[1] - self.F1.n*self.F1.Xi[1], # CH4
-            1 - np.sum(self.F1.Xi), # Xi balance
-            (self.Yield*self.F0.n*(self.F0.Xi[2]+self.F0.Xi[3]) + self.F0.n*self.F0.Xi[6]) - (self.F1.n*self.F1.Xi[6]), #MeOH            
-            # Equil
-            self.F1.Xi[0]*self.F1.Xi[2]*self.K_rWGS() - (self.F1.Xi[3]*self.F1.Xi[4]), 
-        ])
-
-        self.Q = (self.F1.n*self.F1.h - self.F0.n*self.F0.h )
-
-        self.F0_n = self.F0.n
-        self.F0_Xi = self.F0.Xi
-        self.F1_n = self.F1.n
-        self.F1_Xi = self.F1.Xi
-        
-        return self.Eq
-    
-    def K_rWGS(self):
-        return eq.K_rWGS(self.F1.T)
-
-    MBcheck = MeOH_Equil.MBcheck
-
-    def f_sol(self, x): 
-        self.F1.n = x[0]
-        self.F1.Xi = x[1:8]
-        return self.Eqs()
-        
-    def run_sol(self):
-        x0 = np.concatenate(([self.F0.n], media.Fuel_MeOH._default_Xi))
-        return self._solve_composition(self.f_sol, x0)
-
-class MeOH_Kinetic(EquilBase):
-    """
-    Isothermal kinetic based reactor model for methanol synthesis
-    Two reactions are considered:
-        1) CO2 + 3H2 <-> CH3OH + H2O 
-        2) CO2 + H2 <-> CO + H2O 
-    
-    Parameters:
-        name: object's name
-        Medium: media of the inlet stream. Defaults to media.Fuel_MeOH()
-        M_cat: mass of the catalyst in [kg]. Defaults to None
-        T: temperature in [K]. Defaults to 473.15 
-        P: pressure in [bar]. Defaults to 50.0
-        Q: heat released/absorbed in [kJ/s]. Defaults to 0.0 
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium1. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium2. Defaults to None   
-    
-    Attributes: 
-        R: ideal gas constant in [J/mol]
-        Eq: equation to be solved
-        m0: inlet mass flow in [g/s]
-        m1: outlet mass flow in [g/s]
-        F0.Ex: float - inlet exergy flow in [kJ/s]
-        F1.Ex: float - outlet exergy flow in [kJ/s]
-        Exth: thermal exergy of the object in [kJ/s]
-        Exloss: exergy loss in the object in [kJ/s]
-        Exeff: exergy efficiency of the object. It goes between 0 and 1 
-
-    Methods: 
-        Eqs: the outlet mol and Xi are determined. Returns: None
-        r_MeOH: determination of reaction rate of the CO2 to methanol reaction (CO2-Hydrogenation). Returns: float in [mol/kg_cat*s]
-        r_rWGS: determination of reaction rate of the reverse water gas shift reaction (rWGS). Returns: float in [mol/kg_cat*s]
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        ExBs: calls the exergy method on each flange. The ideal and real work are calculated. Returns: None
-        run_sol: empty method. Returns: the system of equations in the "Eqs" method
-    
-    Notes:
-        Reference: Van den Bussche and Froment, 1996, "A steady-state kinetic model for methanol synthesis and the water 
-        gas shift reaction in a commercial catalyst"
-       
-    Examples:
-        MeOH_Kinetic = MeOH_Kinetic.Reactors('MeOH_example', Medium=media.Fuel_MeOH(), M_cat=1000, F0_n=100, 
-        F0_Xi=np.array([0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8]), T=473.15, P=50.0)
-
-    """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_MeOH(), M_cat:float=None,
-                 T:float=473.15, P:float=50, Q:float=0.0,
-                 F0_n:float=1.0, F0_Xi=None,  #F0_Xi:npArray[np.float64]|None=None, 
-                 F1_n:float=1.0, F1_Xi=None #F1_Xi:npArray[np.float64]|None=None
-                 ):
-
-        super().__init__(name, Medium=Medium, T=T, P=P, F0_n=F0_n, F0_Xi=F0_Xi, F1_n=F1_n, F1_Xi=F1_Xi, Q=Q)   
-        self.M_cat = M_cat
-        self.R:float = 8.314462618 # J/mol
-
-        self.F1.P = self.F0.P
-        self.F1.T = self.F0.T   
-
-    # adsorption constants (evaluated at the current reactor temperature)
+    # ---- Van den Bussche & Froment (1996) ---------------------------------------------------------
     _K_a = 3453.38
+
+    def _K_b_at(self, T):
+        return 0.499*np.exp(17197/(self.R*T))
+
+    def _K_c_at(self, T):
+        return 6.62e-11*np.exp(124119/(self.R*T))
 
     @property
     def _K_b(self):
-        return 0.499*np.exp(17197/(self.R*self.F1.T))
+        return self._K_b_at(self.T)
 
     @property
     def _K_c(self):
-        return 6.62e-11*np.exp(124119/(self.R*self.F1.T))
+        return self._K_c_at(self.T)
 
-    def Eqs(self): 
-        rrWGS = self.r_rWGS()   
-        rMeOH = self.r_MeOH()
-        self.Eq:npArray[np.float64] = np.array([          
-            # MB
-            (self.F0.n*self.F0.Xi[0] - 3*rMeOH*self.M_cat - rrWGS*self.M_cat) - self.F1.n*self.F1.Xi[0], # H2 balance
-            (self.F0.n*self.F0.Xi[1]) - self.F1.n*self.F1.Xi[1], # CH4 balance 
-            (self.F0.n*self.F0.Xi[2] - rMeOH*self.M_cat - rrWGS*self.M_cat) - self.F1.n*self.F1.Xi[2], # CO2 balance 
-            (self.F0.n*self.F0.Xi[3] + rrWGS*self.M_cat) - self.F1.n*self.F1.Xi[3], # CO balance            
-            (self.F0.n*self.F0.Xi[4] + rMeOH*self.M_cat + rrWGS*self.M_cat) - self.F1.n*self.F1.Xi[4], # H2O balance
-            (self.F0.n*self.F0.Xi[5]) - self.F1.n*self.F1.Xi[5], # N2 balance
-            (self.F0.n*self.F0.Xi[6] + rMeOH*self.M_cat) - self.F1.n*self.F1.Xi[6], # CH3OH balance                                
-            1 - np.sum(self.F1.Xi), # Xi balance
-        ])
-        
-        self.Q = (self.F1.n*self.F1.h - self.F0.n*self.F0.h )
+    def rates(self, T, P, x):
+        '''(r_MeOH, r_rWGS) in mol/kg_cat/s (Van den Bussche & Froment, 1996).'''
+        i = self._i
+        H2, CO2, CO, H2O, MeOH = (max(float(x[i[k]]), 1e-12) for k in ('H2', 'CO2', 'CO', 'H2O', 'CH3OH'))
+        K_meoh = 10**((3066/T) - 10.592)
+        K_wgs = 10**((2073/T) - 2.029)
+        k_meoh = 1.07*np.exp(36696/(self.R*T))
+        k_rwgs = 1.22e10*np.exp(-94765/(self.R*T))
+        den = 1 + self._K_a*(H2O/H2) + self._K_b_at(T)*(H2*P)**0.5 + self._K_c_at(T)*H2O*P
+        r_meoh = k_meoh*H2*CO2*P**2*(1 - (1/K_meoh)*H2O*MeOH/(H2**3*CO2*P**2))/den**3
+        r_rwgs = k_rwgs*CO2*P*(1 - K_wgs*H2O*CO/(H2*CO2))/den
+        return r_meoh, r_rwgs
 
-        self.F0_n = self.F0.n
-        self.F0_Xi = self.F0.Xi
-        self.F1_n = self.F1.n
-        self.F1_Xi = self.F1.Xi
+    def r_MeOH(self):
+        return self.rates(self.F1.T, self.F1.P, self.F1.Xi)[0]
 
-        return self.Eq
+    def r_rWGS(self):
+        return self.rates(self.F1.T, self.F1.P, self.F1.Xi)[1]
 
-    def r_MeOH(self)->float: 
-        # Equilibrium constant
-        K_meoh = 10**((3066/self.F1.T) - 10.592)
-        # kinetic factor
-        k_meoh = 1.07*np.exp(36696/(self.R*self.F1.T)) #mol/kg_cat*s*bar^2
-        r_num = k_meoh*self.F1.Xi[0]*self.F1.Xi[2]*self.F1.P**2*(1 - (1/K_meoh)*self.F1.Xi[4]*self.F1.Xi[6]/(self.F1.Xi[0]**3*self.F1.Xi[2]*self.F1.P**2))
-        r_den = (1 + self._K_a*(self.F1.Xi[4]/self.F1.Xi[0]) + self._K_b*(self.F1.Xi[0]*self.F1.P)**0.5 + self._K_c*self.F1.Xi[4]*self.F1.P)**3 
-        return r_num/r_den 
-    
-    def r_rWGS(self)->float: 
-        # Equilibrium constant
-        K_wgs = 10**((2073/self.F1.T) - 2.029)
-        # kinetic factor
-        k_rwgs = 1.22e10*np.exp(-94765/(self.R*self.F1.T)) #mol/kg_cat*s*bar
-        r_num = k_rwgs*self.F1.Xi[2]*self.F1.P*(1 - K_wgs*self.F1.Xi[4]*self.F1.Xi[3]/(self.F1.Xi[0]*self.F1.Xi[2]))
-        r_den = (1 + self._K_a*(self.F1.Xi[4]/self.F1.Xi[0]) + self._K_b*(self.F1.Xi[0]*self.F1.P)**0.5 + self._K_c*self.F1.Xi[4]*self.F1.P) 
-        return r_num/r_den 
-
-    MBcheck = MeOH_Equil.MBcheck
-
-    def f_sol(self, x): 
-        self.F1.n = x[0]
-        self.F1.Xi = x[1:8]
-        return self.Eqs()
-        
-    def run_sol(self, guess_x0=np.array([0.709,0.048,0.074,0.031,0.023,0.051, 0.064])):
-        x0 = np.concatenate(([self.F0.n*0.9], guess_x0)) 
-        # the rate expressions divide by x_H2 and x_CO2: keep the iterates strictly positive
-        lower = np.concatenate(([1e-12*self.F0.n], np.full(7, 1e-12)))
-        upper = np.concatenate(([np.inf], np.ones(7)))
-        return solvers.solve(self.f_sol, x0, bounds=(lower, upper), scale=self.F0.n, name=self.name)
-
-#WGS kinetics
-class MeOH_WGS(EquilBase):
-    """
-    Methanol synthesis adiabatic reactor where the methanol yield is given and the WGS reaction is in equilibrium 
-    Inlet and outlet tempeartures can be different
-    Two reactions are considered:
-        1) CO + 2H2 <-> CH3OH  (yield)
-        2) CO2 + 3H2 <-> CH3OH + H2O (yield)
-        3) CO + H2O <-> CO2 + H2 (equilibrium) WGS
-    
-    Parameters:
-        name: object's name
-        Medium: media of the inlet stream. Defaults to media.Fuel_MeOH()
-        Yield: methanol yield. Its goes from 0 to 1. Defaults to 0.35
-        T: temperature in [K]. Defaults to 473.15 
-        P: pressure in [bar]. Defaults to 50.0
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium1. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium2. Defaults to None   
-    
-    Attributes: 
-        Eq: equation to be solved
-        m0: inlet mass flow in [g/s]
-        m1: outlet mass flow in [g/s]
-        F0.Ex: float - inlet exergy flow in [kJ/s]
-        F1.Ex: float - outlet exergy flow in [kJ/s]
-        
-        Exeff: exergy efficiency of the object. It goes between 0 and 1 
-
-    Methods: 
-        Eqs: the outlet mol and Xi are determined. Returns: None
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        Exth: thermal exergy of the object in [kJ/s] defaulted to 0
-        Exloss: exergy loss in the object in [kJ/s]
-        ExBs: calls the exergy method on each flange. The ideal and real work are calculated. Returns: None
-        run_sol: empty method. Returns: the system of equations in the "Eqs" method
-    
-    Notes:
-        Reference: Graaf 1985 "Chemical Equilibria in Methanol Synthesis"
-        Water gas shift reaction kinetics are used 
-        Methanol yield is based on concentrations of CO and CO2 in the incoming streams.
-    
-    Examples:
-        MeOH_Yield = MeOH_yield.Reactors('MeOH_example', Medium=media.Fuel_MeOH(), Yield=0.33, F0_n=100, 
-        F0_Xi=np.array([0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8]), T=473.15, P=50.0)
-    
-    """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_MeOH(), 
-                 Yield:float=0.35, T:float=473.15, P:float=50.0, Q:float=0.0,
-                 F0_n:float=1.0, F0_Xi=None,  #F0_Xi:npArray[np.float64]|None=None, 
-                 F1_n:float=1.0, F1_Xi=None #F1_Xi:npArray[np.float64]|None=None
-                 ):
-        
-        super().__init__(name, Medium=Medium, T=T, P=P, F0_n=F0_n, F0_Xi=F0_Xi, F1_n=F1_n, F1_Xi=F1_Xi, Q=Q)   
-        self._N_H = np.array([2,4,0,0,2,0,4])
-        self._N_C = np.array([0,1,1,1,0,0,1])
-        self._N_O = np.array([0,0,2,1,1,0,1])
-        self._N_N = np.array([0,0,0,0,0,2,0])
-        self.Yield = Yield
-        
-    def Eqs(self):
-
-        self.F1.P = self.F0.P
-        
-        self.Eq:npArray[np.float64] = np.array([
-            # MB
-            self.F0.n*(np.dot(self.F0.Xi, self._N_C)) - self.F1.n*(np.dot(self.F1.Xi, self._N_C)), # C balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_H)) - self.F1.n*(np.dot(self.F1.Xi, self._N_H)), # H balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_O)) - self.F1.n*(np.dot(self.F1.Xi, self._N_O)), # O balance
-            self.F0.n*(np.dot(self.F0.Xi, self._N_N)) - self.F1.n*(np.dot(self.F1.Xi, self._N_N)), # N balance
-            self.F0.n*self.F0.Xi[1] - self.F1.n*self.F1.Xi[1], # CH4
-            1 - np.sum(self.F1.Xi), # Xi balance       
-            # Equil
-            self.F1.Xi[3]*self.F1.Xi[4]*self.K_WGS() - (self.F1.Xi[2]*self.F1.Xi[0]), #WGS
-
-            (self.Yield*self.F0.n*(self.F0.Xi[3]+self.F0.Xi[2]) + self.F0.n*self.F0.Xi[6]) - (self.F1.n*self.F1.Xi[6]), #CO and CO2 to MeOH 
-            self.Q, #EBal
-        ])
-        
-        return self.Eq
-
+    # ---- results ------------------------------------------------------------------------------------
     @property
-    def Q(self):
-        return self.F0.n*self.F0.h - self.F1.n*self.F1.h 
-    
-    def K_WGS(self):
-        return eq.K_WGS(self.F1.T)
-        
-    def MBcheck(self)->float:
+    def conversion(self):
+        i, f0, f1 = self._i, self.F0, self.F1
+        c_in = f0.n*(f0.Xi[i['CO2']] + f0.Xi[i['CO']])
+        c_out = f1.n*(f1.Xi[i['CO2']] + f1.Xi[i['CO']])
+        return {"H2 Conversion": 1 - f1.n*f1.Xi[i['H2']]/(f0.n*f0.Xi[i['H2']]),
+                "CO2 Conversion": 1 - f1.n*f1.Xi[i['CO2']]/(f0.n*f0.Xi[i['CO2']]),
+                "Carbon Conversion": 1 - c_out/c_in}
+
+    def MBcheck(self) -> float:
+        """Print the relative mass balance error and return out - in, g/s."""
         MB = self.F1.m - self.F0.m
-        print(f"{(self.F1.m/(self.F0.m) - 1)*100}% difference")
+        print(f"{(self.F1.m/self.F0.m - 1)*100}% difference")
         return MB
-    
-    @property
-    def Exth(self):
-        return 0 
 
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
-    
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n 
 
-    @property
-    def conversion(self): 
-        H2Conv = ((self.F0.Xi[0])*self.F0.n - (self.F1.Xi[0])*self.F1.n)/((self.F0.Xi[0])*self.F0.n)
-        CO2Conv = ((self.F0.Xi[2])*self.F0.n - (self.F1.Xi[2])*self.F1.n)/((self.F0.Xi[2])*self.F0.n)
-        CConv = ((self.F0.Xi[2]+self.F0.Xi[3])*self.F0.n - (self.F1.Xi[2]+self.F0.Xi[3])*self.F1.n)/((self.F0.Xi[2]+self.F0.Xi[3])*self.F0.n)
-        return {"H2 Conversion": H2Conv, "CO2 Conversion": CO2Conv, "Carbon Conversion": CConv}
-        
-    def f_sol(self, x): 
-        self.F1.n = np.abs(x[0])
-        self.F1.Xi = x[1:8]#np.abs(x[1:8])
-        self.F1.T = np.abs(x[8])
-        return self.Eqs()
-        
-    def run_sol(self):
-        x0 = np.concatenate(([self.F0.n*0.9], np.array([0.69, 0.003, 0.17, 0.09, 0.027, 1e-10, 0.02 ]) , [self.F0.T*1.05]))
-        lower = np.concatenate(([1e-12*self.F0.n], np.zeros(7), [200.0]))
-        upper = np.concatenate(([np.inf], np.ones(7), [3000.0]))
-        return solvers.solve(self.f_sol, x0, bounds=(lower, upper), scale=self.F0.n, name=self.name)
+def _former_meoh(model, adiabatic=False):
+    def init(self, name:str, Medium:media.Medium_Base=media.Fuel_MeOH(), Yield:float=0.35, M_cat:float|None=None,
+             T:float=473.15, P:float=50.0, Q:float=0.0, F0_n:float=1.0, F0_Xi=None, F1_n=None, F1_Xi=None):
+        from .._deprecation import warn_deprecated
+        new = "MeOH(name, Medium, model='%s'%s)" % (model, ", Q=0" if adiabatic else ", T=...")
+        warn_deprecated(f"{type(self).__name__} is deprecated: use {new}", stacklevel=3)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', CelesteDeprecationWarning)
+            MeOH.__init__(self, name, Medium, model=model, Yield=Yield, M_cat=M_cat,
+                          T=None if adiabatic else T, Q=0.0 if adiabatic else None,
+                          F0_n=F0_n, F0_Xi=F0_Xi, F0_T=T, F0_P=P)
+    return init
+
+
+class MeOH_Equil(MeOH):
+    """Former isothermal equilibrium methanol reactor: ``MeOH(name, Medium, model='equilibrium', T=...)``."""
+    __init__ = _former_meoh('equilibrium')
+
+
+class MeOH_Yield(MeOH):
+    """Former isothermal yield reactor: ``MeOH(name, Medium, model='yield', Yield=..., T=...)``."""
+    __init__ = _former_meoh('yield')
+
+
+class MeOH_Kinetic(MeOH):
+    """Former isothermal kinetic reactor: ``MeOH(name, Medium, model='kinetic', M_cat=..., T=...)``."""
+    __init__ = _former_meoh('kinetic')
+
+
+class MeOH_WGS(MeOH):
+    """Former adiabatic yield reactor: ``MeOH(name, Medium, model='yield', Yield=..., Q=0)``."""
+    __init__ = _former_meoh('yield', adiabatic=True)
+
 
 class Reformer(ModelBase):
     '''
