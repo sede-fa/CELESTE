@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 import numpy as np
+import scipy.optimize as spo
 import pandas as pd
 
 from ..CSL import thermo as th
@@ -496,6 +497,114 @@ class Thermo:
         return 1/Pdew
 ''' 
     
+# ---- vapour pressures (Raoult flash) -----------------------------------------------------------
+_WATER_TC, _WATER_PC = 647.096, 220.64                      # K, bar
+_WAGNER = (-7.85951783, 1.84408259, -11.7866497, 22.6807411, -15.9618719, 1.80122502)
+
+
+def psat_water(T: float) -> float:
+    """Saturation pressure of water [bar], Wagner and Pruss (IAPWS 1992); infinite above the critical point."""
+    if T >= _WATER_TC:
+        return np.inf
+    tau = 1.0 - T/_WATER_TC
+    a = _WAGNER
+    return _WATER_PC*np.exp(_WATER_TC/T*(a[0]*tau + a[1]*tau**1.5 + a[2]*tau**3 + a[3]*tau**3.5
+                                          + a[4]*tau**4 + a[5]*tau**7.5))
+
+
+def vapour_pressures(T: float, species) -> np.ndarray:
+    """
+    Vapour pressure [bar] of every species at T.
+
+    Hydrocarbons C2+: Clausius-Clapeyron over the Watson heat of vaporisation, the same relation that gives
+    the liquid entropy (``_VapCalc``), so a Raoult flash is consistent with the liquid properties. Water:
+    Wagner-Pruss. Permanent gases (H2, CO, CO2, N2, CH4 and every species above its critical temperature):
+    infinite, i.e. they do not dissolve in the liquid.
+    """
+    species = [str(sp) for sp in species]
+    out = np.full(len(species), np.inf)
+    hc = [i for i, sp in enumerate(species) if sp not in ('H2', 'CO2', 'H2O', 'CO', 'N2', 'H2O(L)', 'CH4', 'O2', 'NH3')]
+    for i, sp in enumerate(species):
+        if sp in ('H2O', 'H2O(L)'):
+            out[i] = psat_water(float(T))
+    if hc:
+        d = _hc_data(tuple(species[i] for i in hc), tuple(species[i] for i in hc))
+        vap = dict(B=d['HVAP_B'], n=d['HVAP_n'], Tc=d['Tc'], Tmin=d['HVAP_Tmin'], Tb=d['T_boil'], cpl=d['cpl'],
+                   C_N=d['C_N'])
+        hvap, svap, _ = _VapCalc(float(T), vap, Thermo._m, Thermo._c, Thermo.R)
+        with np.errstate(over='ignore'):
+            lnP = (svap - hvap/float(T))/Thermo.R
+            p_hc = np.where(hvap > 0, np.exp(lnP), np.inf)
+        out[hc] = p_hc
+    return out
+
+
+def raoult_split(n, Psat, P, water=None):
+    """
+    Vapour-liquid split of the component flows ``n`` [mol/s] at pressure ``P`` [bar].
+
+    The condensable organics form an ideal liquid solution (Raoult: y_i P = x_i Psat_i); water, if its index
+    is given, condenses as a separate pure liquid (y_w P = Psat_w), since water and hydrocarbons are
+    practically immiscible. Species with an infinite vapour pressure stay in the vapour.
+
+    Returns (vapour flows, organic liquid flows, water liquid flow).
+    """
+    n = np.maximum(np.asarray(n, dtype=float), 0.0)
+    K = np.asarray(Psat, dtype=float)/P
+    org = np.isfinite(K)
+    if water is not None:
+        org[water] = False
+    N = n.sum()
+    if N <= 0:
+        return n.copy(), np.zeros_like(n), 0.0
+
+    def vapour(V, L):
+        """Vapour flows for vapour V and organic liquid L (total flows)."""
+        v = n.copy()
+        v[org] = n[org]/(1.0 + L/(V*K[org]))
+        if water is not None:
+            v[water] = min(n[water], K[water]*V) if np.isfinite(K[water]) else n[water]
+        return v
+
+    def V_of(L):
+        """Total vapour flow that closes the vapour (sum y = 1) for a given organic liquid flow L."""
+        f = lambda V: vapour(V, L).sum() - V
+        hi = N - L
+        if hi <= 0 or f(hi) >= 0:
+            return max(hi, 0.0)
+        lo = 1e-14*N
+        if f(lo) <= 0:
+            return 0.0
+        return spo.brentq(f, lo, hi, xtol=1e-14*N, rtol=1e-13)
+
+    def excess(L):
+        """Sum of the organic liquid mole fractions minus one at liquid flow L (> 0: more liquid forms)."""
+        V = V_of(L)
+        if V <= 0:
+            return -1.0
+        v = vapour(V, L)
+        x = v[org]/(V*K[org])
+        return x.sum() - 1.0
+
+    L = 0.0
+    n_org = n[org].sum()
+    if n_org > 0 and excess(1e-14*N) > 0:
+        hi = n_org*(1.0 - 1e-12)
+        L = spo.brentq(excess, 1e-14*N, hi, xtol=1e-14*N, rtol=1e-13) if excess(hi) < 0 else hi
+    V = V_of(L)
+    if V <= 0:                                   # no vapour (only possible without permanent gases)
+        liq = np.where(org, n, 0.0)
+        w = float(n[water]) if water is not None else 0.0
+        v = n - liq
+        if water is not None:
+            v[water] = 0.0
+        return v, liq, w
+    v = vapour(V, L)
+    liq = np.where(org, n - v, 0.0)
+    w = (n[water] - v[water]) if water is not None else 0.0
+    return v, liq, float(w)
+
+
 @lru_cache(maxsize=None)
 def _reference_ft(species: tuple, T0: float, P0: float):
     '''

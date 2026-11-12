@@ -218,3 +218,58 @@ def test_rstoic_heat_duty_is_the_enthalpy_balance():
     assert r.Q == pytest.approx(3.732064, rel=1e-5)                          # endothermic steam reforming
     r.ExBs()
     assert r.Exloss > 0 and 0 < r.Exeff < 1
+
+
+@pytest.fixture
+def ft_effluent():
+    med = mediaFT.Syncrude()
+    sp = [str(s) for s in med.species]
+    x = np.full(len(sp), 1e-12)
+    for k, v in {'H2': 0.3, 'CO': 0.15, 'CO2': 0.05, 'H2O': 0.25, 'CH4': 0.05, 'C3H8': 0.03, 'C6H14': 0.05,
+                 'C10H22': 0.05, 'C16H34': 0.05, 'C25H52': 0.02}.items():
+        x[sp.index(k)] = v
+    return med, sp, x/x.sum()
+
+
+def test_vapour_pressures():
+    p = thermoFT.vapour_pressures(309.2, ['H2', 'CO', 'H2O', 'CH4', 'C5H12', 'C6H14'])
+    assert np.isinf(p[[0, 1, 3]]).all()                               # permanent gases do not dissolve
+    assert p[4] == pytest.approx(1.01325, rel=2e-3)                   # pentane at its normal boiling point
+    assert p[5] == pytest.approx(0.33, rel=0.05)                       # hexane (Yaws: 0.33 bar)
+    assert thermoFT.psat_water(373.124) == pytest.approx(1.01325, rel=1e-4)
+    assert thermoFT.psat_water(298.15) == pytest.approx(0.031699, rel=1e-4)
+
+
+def test_raoult_flash(ft_effluent):
+    med, sp, x = ft_effluent
+    d = componentsFT.Flash('d', med, T=320.0, P=20.0)
+    d.F0.set(n=10.0, Xi=x, T=500.0, P=20.0)
+    d.run_sol()
+    assert 0 < d.beta < 1 and d.water_liquid > 0
+    assert d.mass_balance() == pytest.approx(0.0, abs=1e-9)
+    for gas in ('H2', 'CO', 'CO2', 'CH4'):
+        assert d.F2.Xi[sp.index(gas)] == 0.0                            # no dissolved gases
+    # equilibrium: Raoult for the organics, pure liquid water at its vapour pressure
+    psat = thermoFT.vapour_pressures(320.0, sp)
+    w, org_liq = sp.index('H2O'), d.F2.n*d.F2.Xi
+    n_org = org_liq.sum() - org_liq[w]
+    for k in ('C6H14', 'C10H22', 'C16H34'):
+        i = sp.index(k)
+        assert d.F1.Xi[i]*20.0 == pytest.approx(org_liq[i]/n_org*psat[i], rel=1e-8)
+    assert d.F1.Xi[w]*20.0 == pytest.approx(psat[w], rel=1e-8)
+    assert d.F2.phase == 'Liquid' and d.F1.phase == 'Gas'
+    # second law; not exactly T0*Sgen because the wet feed condenses at the dead state (exergy reference)
+    assert d.Sgen > 0 and d.Exloss == pytest.approx(298.15*d.Sgen, rel=1e-3)
+
+
+def test_raoult_flash_above_the_dew_point_and_adiabatic(ft_effluent):
+    med, sp, x = ft_effluent
+    hot = componentsFT.Flash('h', med, T=700.0, P=2.0)
+    hot.F0.set(n=1.0, Xi=x, T=700.0, P=2.0)
+    hot.run_sol()
+    assert hot.beta == 1.0 and hot.F2.n == 0.0
+    adi = componentsFT.Flash('a', med, Q=0.0, P=5.0)
+    adi.F0.set(n=10.0, Xi=x, T=500.0, P=20.0)
+    assert adi.run_sol().success and adi.Q == pytest.approx(0.0, abs=1e-6)
+    with pytest.raises(ValueError):
+        componentsFT.Flash('x', med, T=300.0, Q=0.0)

@@ -2,7 +2,8 @@ import numpy as np
 import scipy.optimize as spo
 
 from ..CSL import interfaces, media, ModelBase, components as comp
-from . import interfacesFT as interFT, mediaFT
+from .. import solvers
+from . import interfacesFT as interFT, mediaFT, thermoFT
 
 from numpy.typing import NDArray as npArray
 from typing import Literal
@@ -475,3 +476,82 @@ class CompIsent(comp.CompIsent):
 
 
 
+
+
+class Flash(ModelBase):
+    """
+    Vapour-liquid flash drum for FT media with Raoult's law.
+
+    The hydrocarbons C2+ form an ideal liquid solution (y_i P = x_i Psat_i), water condenses as a separate
+    pure liquid (y_w P = Psat_w), and the permanent gases (H2, CO, CO2, N2, CH4) do not dissolve. The vapour
+    pressures are the ones behind the FT liquid properties (``thermoFT.vapour_pressures``), so phase split
+    and enthalpies are consistent. For dissolved gases or non-ideal liquids use ``CSL.separation.Flash``
+    with real-fluid media.
+
+    Parameters:
+        name:   objects name
+        Medium: FT medium (``mediaFT.*``)
+        T:      drum temperature [K]; Q: heat duty [kJ/s] (Q=0 adiabatic). Neither: isothermal at the feed T
+        P:      drum pressure [bar]; otherwise the feed pressure minus ``dP``
+
+    Ports: F0 (feed) -> F1 (vapour, phase 'Gas'), F2 (liquid: hydrocarbons + water, phase 'Liquid')
+    Properties: beta (vapour fraction), water_liquid (mol/s of liquid water), Q, Exloss, Sgen
+
+    Example:
+        drum = componentsFT.Flash('drum', mediaFT.Syncrude(), T=310.0, P=20.0)
+        drum.F0.set(n=10.0, Xi=x_syncrude, T=500.0, P=20.0)
+        drum.run_sol()
+    """
+
+    def __init__(self, name:str, Medium:mediaFT.Medium_Syncrude, T:float|None=None, P:float|None=None,
+                 Q:float|None=None, dP:float=0.0):
+        if T is not None and Q is not None:
+            raise ValueError(f"{name}: give either the drum temperature T or the heat duty Q, not both")
+        super().__init__(dict(name=name, Medium=Medium, dP=dP))
+        self.T_spec, self.P_spec, self.Q_spec = T, P, Q
+        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, phase='Gas')
+        self.F1 = interFT.Flange(name + '.F1', Medium=Medium, phase='Gas')
+        self.F2 = interFT.Flange(name + '.F2', Medium=Medium, phase='Liquid', n=0.0)
+        sp = [str(x) for x in Medium.species]
+        self._water = sp.index('H2O') if 'H2O' in sp else None
+        self.beta, self.water_liquid = 1.0, 0.0
+
+    def _split(self, T:float, P:float) -> None:
+        n = self.F0.n*np.maximum(np.asarray(self.F0.Xi, dtype=float), 0.0)
+        psat = thermoFT.vapour_pressures(T, self.F0.Medium.species)
+        v, liq, w = thermoFT.raoult_split(n, psat, P, self._water)
+        liq = liq.copy()
+        if self._water is not None:
+            liq[self._water] += w
+        nV, nL = float(v.sum()), float(liq.sum())
+        self.beta, self.water_liquid = nV/max(nV + nL, 1e-300), w
+        for f, flows, total in ((self.F1, v, nV), (self.F2, liq, nL)):
+            f.n = total
+            f.P, f.T = P, T
+            if total > 0:
+                f.Xi = flows/total
+
+    @property
+    def Q(self):
+        return self.F1.n*self.F1.h + self.F2.n*self.F2.h - self.F0.n*self.F0.h
+
+    @property
+    def Exloss(self):
+        from ..CSL.exergy import T0
+        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Q*(1 - T0/self.F1.T)
+
+    @property
+    def Sgen(self):
+        return self.F1.n*self.F1.s + self.F2.n*self.F2.s - self.F0.n*self.F0.s - self.Q/self.F1.T
+
+    def run_sol(self):
+        P = self.P_spec if self.P_spec is not None else self.F0.P - self.dP
+        if self.Q_spec is None:
+            T = self.T_spec if self.T_spec is not None else self.F0.T
+            self._split(T, P)
+            return solvers.trivial_solution([T])
+
+        def residual(T):
+            self._split(T, P)
+            return (self.Q - self.Q_spec)/max(self.F0.n, 1e-300)
+        return solvers.solve_scalar(residual, 200.0, max(self.F0.T, 200.0) + 500.0, x0=self.F0.T, name=self.name)

@@ -15,6 +15,8 @@ version may notice.
   - `fluid`: real-fluid stream state (gas, liquid or two-phase)
   - `units`: Equinox prototypes of process units
 - **`CSL.separation.Flash`** – vapour–liquid flash drum (isothermal, adiabatic or with a given duty)
+- **`FT.componentsFT.Flash`** – Raoult flash for FT media: ideal hydrocarbon solution, immiscible liquid water,
+  permanent gases stay in the vapour; `FT.thermoFT.vapour_pressures`, `psat_water`, `raoult_split`
 - **`CSL.media.Medium_PRbase`** and `Fuel_CH4_PR`, `Fuel_MeOH_PR`, `HB_PR`, `Air_PR`, `Water_PR` – real-fluid
   media; `CSL.thermo.Thermo_PR`
 - **`CSL.reactors.ExtentReactor`** – base for reactors solved for their reaction extents: element balances

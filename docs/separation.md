@@ -109,3 +109,31 @@ Everything runs in fixed-shape JAX loops: the flash can be compiled, vectorised
   non-ideal liquids (water–alcohol): compositions of the liquid phase should
   be checked against data if they matter.
 - Compilation takes a few seconds for every new set of species.
+
+## Fischer–Tropsch streams: Raoult flash
+
+`celeste.FT.componentsFT.Flash` is a simpler flash for FT media (`mediaFT.*`),
+where Peng–Robinson data for 50 hydrocarbons would be needed otherwise:
+
+- The hydrocarbons C2+ form an ideal liquid solution: y_i P = x_i Psat_i.
+- Water condenses as a separate, pure liquid: y_w P = Psat_w (water and
+  hydrocarbons are practically immiscible). The liquid outlet carries both
+  liquids; the FT liquid properties already treat water as a separate phase.
+- H2, CO, CO2, N2, CH4 and every species above its critical temperature do not
+  dissolve.
+
+The hydrocarbon vapour pressures come from the same Clausius–Clapeyron
+integral that gives the FT liquid entropy (`thermoFT.vapour_pressures`), so
+the split and the stream enthalpies are consistent; water uses the
+Wagner–Pruss equation. Pentane boils at 1.013 bar at 309.2 K, hexane has
+0.33 bar at 309 K (Yaws).
+
+```python
+drum = componentsFT.Flash('drum', mediaFT.Syncrude(), T=310.0, P=20.0)   # or Q=0.0 for adiabatic
+drum.F0.set(n=10.0, Xi=x_effluent, T=500.0, P=20.0)
+drum.run_sol()
+drum.beta, drum.water_liquid, drum.F1, drum.F2
+```
+
+Use `CSL.separation.Flash` with real-fluid media when dissolved gases or
+non-ideal liquids matter (high-pressure separators, light-end recovery).
