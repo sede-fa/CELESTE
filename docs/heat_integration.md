@@ -60,7 +60,29 @@ LMTD, U, area and cost.
 | `latent_dT` | 1 K | temperature glide given to isothermal streams |
 | `h_default` | 1 kW/m²/K | film coefficient of streams without an `h` entry |
 | `solve(refine=True)` | | optimise duties and areas after the topology search |
-| `solve(time_limit=60, mip_gap=1e-4)` | | limits of the topology search |
+| `solve(objective='cost')` | `'cost'` | what the topology search minimises, see below |
+| `solve(time_limit=600, mip_gap=1e-4)` | | limits of each topology MILP (seconds, relative gap) |
+
+### Objectives
+
+| `objective=` | Topology search | Typical use |
+|---|---|---|
+| `'cost'` | utility cost + fixed charge per exchanger (areas added by the refinement) | design studies with project cost figures |
+| `'mer'` | least hot utility the superstructure allows, then the fewest exchangers that achieve it | energy targets as a hard requirement; the classic MER design |
+| `'min_units'` | fewest exchangers, heaters and coolers, then the least utility cost with that many | simple networks, retrofit screening |
+
+`'mer'` and `'min_units'` solve two MILPs in sequence (each with `time_limit`),
+and their refinement keeps the heat recovery of the topology, so the utilities
+do not grow. For the four-stream example of Linnhoff and Hindmarsh (dt_min 20 K):
+
+| Objective | Exchangers + heaters + coolers | Hot utility / kW |
+|---|---|---|
+| `'cost'` (default costs) | 3 + 1 + 1 | 137.5 |
+| `'mer'` | 4 + 2 + 1 | 107.5 (the pinch target) |
+| `'min_units'` | 2 + 1 + 1 | 262.5 |
+
+Stream splitting is part of the superstructure for every objective: a stream can
+meet several partners in the same stage (parallel branches, mixed isothermally).
 
 `HENCosts(hot_utility=100, cold_utility=15, unit_fixed=8000, area_coeff=500, area_exp=0.8)`:
 utilities per kW and year, exchangers `unit_fixed + area_coeff · A^area_exp` per
@@ -98,7 +120,7 @@ Consequences:
 |---|---|---|
 | 2 hot × 2 cold, 2 stages | 12 | 0.2 s |
 | 3 hot × 2 cold, 3 stages | 23 | 0.7 s |
-| 6 hot × 6 cold, 4 stages | 156 | hits the 30 s limit with a 14 % gap |
+| 6 hot × 6 cold, 4 stages | 156 | hits a 30 s limit with a 14 % gap; use the 600 s default or more |
 
 For large tables reduce `n_stages`, raise `time_limit`, or remove small streams
 with `pinch_stream_table(min_duty=...)`. `summary()['milp_optimal']` and

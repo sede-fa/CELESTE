@@ -26,6 +26,7 @@ version may notice.
 - `Flange.set(n=, Xi=, T=, P=)`; `Flange.compatible(other)` and `Flange.incompatibility(other)` (the reason as
   text)
 - **`celeste.HEN.HENSynthesiser`** – heat exchanger network synthesis from the pinch stream table
+  (`solve(objective='cost' | 'mer' | 'min_units')`, default MILP time limit 600 s)
 - **`CSL.systems.ProcessBoxes`** – `CondenserBox`, `MethanolLoop`
 - **`RecycleMixin.Recycle_Tear`** – recycle convergence on the full tear stream (Anderson, Aitken/Steffensen,
   Wegstein with adaptive or fixed q, direct; `n_direct` start-up passes). See `docs/recycles.md`, which also

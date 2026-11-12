@@ -160,7 +160,7 @@ class HENSynthesiser:
     # ------------------------------------------------------------------
     # step 1: topology (MILP)
     # ------------------------------------------------------------------
-    def _solve_milp(self, time_limit, mip_gap):
+    def _solve_milp(self, time_limit, mip_gap, objective='cost'):
         hot, cold, K, dt = self._hot, self._cold, self.n_stages, self.dt_min
         nh, nc = len(hot), len(cold)
         Fh, Fc = hot.CP.values, cold.CP.values
@@ -235,25 +235,47 @@ class HENSynthesiser:
             hi[o_zhu + j] = 1.0
             integrality[o_zhu + j] = 1
 
-        c = np.zeros(n)
         cost = self.costs
-        c[o_qcu:o_qcu + nh] = cost.cold_utility
-        c[o_qhu:o_qhu + nc] = cost.hot_utility
-        c[o_z:o_z + n_q] = cost.unit_fixed
-        c[o_zcu:o_zcu + nh] = cost.unit_fixed
-        c[o_zhu:o_zhu + nc] = cost.unit_fixed
+        unit_cols = np.r_[o_z:o_z + n_q, o_zcu:o_zcu + nh, o_zhu:o_zhu + nc]
         # tie-break between topologies of equal cost: prefer large driving forces (smaller areas)
-        scale = 1e-6*max(cost.unit_fixed, 1.0)/max(Qh.sum() + Qc.sum(), 1.0)
+        tie = np.zeros(n)
+        tb = 1e-6*max(cost.unit_fixed, 1.0)/max(Qh.sum() + Qc.sum(), 1.0)
         for i in range(nh):
             for j in range(nc):
                 for k in range(K):
-                    c[q(i, j, k)] = scale/max(Thi[i] - Tci[j], self.dt_min)
+                    tie[q(i, j, k)] = tb/max(Thi[i] - Tci[j], self.dt_min)
 
-        A = sparse.csr_matrix((vals, (rows, cols)), shape=(len(lb), n))
-        res = spo.milp(c, constraints=spo.LinearConstraint(A, np.array(lb), np.array(ub)), integrality=integrality,
-                       bounds=spo.Bounds(lo, hi), options=dict(time_limit=time_limit, mip_rel_gap=mip_gap))
-        if res.x is None:
-            raise RuntimeError(f"HEN topology problem could not be solved: {res.message}")
+        def run(c, extra=()):
+            A_rows = sparse.csr_matrix((vals, (rows, cols)), shape=(len(lb), n))
+            lo_c, hi_c = list(lb), list(ub)
+            for coeffs, lo_x, hi_x in extra:
+                A_rows = sparse.vstack([A_rows, sparse.csr_matrix(coeffs.reshape(1, -1))])
+                lo_c.append(lo_x); hi_c.append(hi_x)
+            res = spo.milp(c, constraints=spo.LinearConstraint(A_rows.tocsr(), np.array(lo_c), np.array(hi_c)),
+                           integrality=integrality, bounds=spo.Bounds(lo, hi),
+                           options=dict(time_limit=time_limit, mip_rel_gap=mip_gap))
+            if res.x is None:
+                raise RuntimeError(f"HEN topology problem could not be solved: {res.message}")
+            return res
+
+        c_util = np.zeros(n)
+        c_util[o_qcu:o_qcu + nh] = cost.cold_utility
+        c_util[o_qhu:o_qhu + nc] = cost.hot_utility
+        c_units = np.zeros(n)
+        c_units[unit_cols] = 1.0
+        if objective == 'cost':
+            res = run(c_util + cost.unit_fixed*c_units + tie)
+        elif objective == 'mer':
+            # 1) least hot utility the superstructure allows, 2) fewest units at that utility
+            e_hu = np.zeros(n); e_hu[o_qhu:o_qhu + nc] = 1.0
+            first = run(e_hu + 1e-9*c_util)
+            q_hu = float(e_hu @ first.x)
+            res = run(c_units + 1e-6*c_util/max(cost.hot_utility, cost.cold_utility, 1e-300) + tie,
+                      [(e_hu, -np.inf, q_hu + 1e-7*max(Qc.sum(), 1.0))])
+        else:   # 'min_units': 1) fewest units, 2) least utility cost with that many units
+            first = run(c_units + tie)
+            n_units = float(np.round(c_units @ first.x))
+            res = run(c_util + tie, [(c_units, -np.inf, n_units + 0.5)])
         self.milp_status = dict(status=int(res.status), message=str(res.message), optimal=bool(res.status == 0),
                                 gap=float(getattr(res, "mip_gap", np.nan)))
         x = res.x
@@ -311,7 +333,7 @@ class HENSynthesiser:
     # ------------------------------------------------------------------
     # step 2: loads and areas (NLP)
     # ------------------------------------------------------------------
-    def _refine(self, q0):
+    def _refine(self, q0, keep_recovery=False):
         import jax
         import jax.numpy as jnp
         from ..jx import enable_x64
@@ -351,6 +373,8 @@ class HENSynthesiser:
         for j in range(nc):
             row = np.array([1.0 if b == j else 0.0 for _, b, _ in idx])
             A.append(row); hi.append(Qc[j]); lo.append(-np.inf if hu_on[j] else Qc[j])   # no new heater
+        if keep_recovery:   # total process-process duty at least that of the topology: no more utility
+            A.append(np.ones(len(idx))); lo.append(q0[active].sum()*(1.0 - 1e-9)); hi.append(np.inf)
         A, lo, hi = np.array(A), np.array(lo), np.array(hi)
 
         act, cu_j, hu_j = jnp.asarray(active, dtype=float), jnp.asarray(cu_on, dtype=float), jnp.asarray(hu_on, dtype=float)
@@ -382,23 +406,36 @@ class HENSynthesiser:
     # ------------------------------------------------------------------
     # driver and reports
     # ------------------------------------------------------------------
-    def solve(self, refine: bool = True, time_limit: float = 60.0, mip_gap: float = 1e-4):
+    OBJECTIVES = ('cost', 'mer', 'min_units')
+
+    def solve(self, refine: bool = True, time_limit: float = 600.0, mip_gap: float = 1e-4,
+              objective: str = 'cost'):
         """
         Synthesise the network.
 
         Parameters
         ----------
-        refine     : optimise duties and areas for the total annual cost after the topology search
-        time_limit : time limit of the MILP in seconds (the best network found so far is used afterwards)
+        refine     : optimise duties and areas for the total annual cost after the topology search; for
+                     'mer' and 'min_units' the heat recovery of the topology is kept (utilities do not grow)
+        time_limit : time limit of each MILP in seconds (the best network found so far is used afterwards);
+                     'mer' and 'min_units' solve two MILPs in sequence
         mip_gap    : relative optimality gap at which the MILP stops
+        objective  : 'cost'      - total annual cost: utilities + fixed charge per exchanger (+ areas when refined)
+                     'mer'       - maximum energy recovery: least hot utility the superstructure allows, then
+                                   the fewest exchangers that achieve it
+                     'min_units' - fewest exchangers (process exchangers, heaters and coolers), then the least
+                                   utility cost with that many
         """
+        if objective not in self.OBJECTIVES:
+            raise ValueError(f"objective must be one of {self.OBJECTIVES}")
+        self.objective = objective
         if len(self._hot) == 0 or len(self._cold) == 0:
             q = np.zeros((len(self._hot), len(self._cold), self.n_stages))
             self.milp_status = dict(status=0, message="no process-process matches possible", optimal=True, gap=0.0)
         else:
-            q = self._solve_milp(time_limit, mip_gap)
+            q = self._solve_milp(time_limit, mip_gap, objective)
             if refine:
-                q = self._refine(q)
+                q = self._refine(q, keep_recovery=objective != 'cost')
             q = np.where(q > 1e-7*max(self._hot.Q.sum(), 1.0), q, 0.0)
         self._build_reports(q)
         return self
@@ -467,6 +504,7 @@ class HENSynthesiser:
         utility = cost.hot_utility*self.hot_utility_load + cost.cold_utility*self.cold_utility_load
         return pd.Series({
             "dt_min": self.dt_min,
+            "objective": getattr(self, 'objective', 'cost'),
             "n_stages": self.n_stages,
             "hot_utility": self.hot_utility_load,
             "cold_utility": self.cold_utility_load,

@@ -120,3 +120,29 @@ def test_input_validation(four_streams):
         HENSynthesiser(pd.concat([four_streams, four_streams]), 20)
     with pytest.raises(RuntimeError):
         HENSynthesiser(four_streams, 20).summary()
+
+
+def test_objective_mer_reaches_the_pinch_targets(four_streams):
+    """'mer' reaches the energy targets whatever the costs, with the fewest exchangers that can."""
+    dear_units = HENCosts(unit_fixed=1e6)
+    hen = HENSynthesiser(four_streams, 20, n_stages=4, costs=dear_units).solve(objective='mer')
+    s = hen.summary()
+    assert s.objective == 'mer' and hen.check().feasible
+    assert s.hot_utility == pytest.approx(107.5, abs=1e-5) and s.cold_utility == pytest.approx(40.0, abs=1e-5)
+    assert s.n_exchangers + s.n_heaters + s.n_coolers == 7      # 4 exchangers, 2 heaters, 1 cooler
+
+
+def test_objective_min_units(four_streams):
+    """'min_units' uses no more units than any other objective and can need more utility."""
+    few = HENSynthesiser(four_streams, 20).solve(objective='min_units').summary()
+    mer = HENSynthesiser(four_streams, 20, n_stages=4).solve(objective='mer').summary()
+    cost = HENSynthesiser(four_streams, 20).solve().summary()
+    units = lambda s: s.n_exchangers + s.n_heaters + s.n_coolers
+    assert units(few) <= min(units(mer), units(cost))
+    assert few.hot_utility >= mer.hot_utility - 1e-6
+    assert units(few) == 4 and few.hot_utility == pytest.approx(262.5)   # C1 entirely on hot utility
+
+
+def test_objective_is_validated(four_streams):
+    with pytest.raises(ValueError, match="objective"):
+        HENSynthesiser(four_streams, 20).solve(objective='area')
