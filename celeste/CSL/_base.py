@@ -82,6 +82,34 @@ class ModelBase(Base):
         """
         return [v for _, v in self._members(Flange)]
 
+    #: default inlet state of a stand-alone unit: {'F0': dict(n=..., Xi=..., T=..., P=...)}
+    _inlet_state: dict = {}
+
+    def _init_state(self, legacy: dict) -> None:
+        '''
+        Apply the default inlet state (``_inlet_state``) and the former state keywords
+        (``F0_n``, ``F0_Xi``, ``F0_T``, ``F0_P``, ...; outlet guesses such as ``F1_n`` are ignored).
+        The state keywords still work but are deprecated: the operating state belongs on the flanges.
+        '''
+        for port, state in self._inlet_state.items():
+            getattr(self, port).set(**state)
+        used = []
+        for key, value in legacy.items():
+            port, _, var = key.partition('_')
+            flange = getattr(self, port, None)
+            if not isinstance(flange, Flange) or var not in ('n', 'Xi', 'T', 'P'):
+                raise TypeError(f"{type(self).__name__}() got an unexpected keyword argument '{key}'")
+            if value is None:
+                continue
+            used.append(key)
+            if self._is_inlet(port):
+                flange.set(**{var: value})
+        if used:
+            from .._deprecation import warn_deprecated
+            warn_deprecated(f"{type(self).__name__}({', '.join(used)}=...): state keywords are deprecated; set the "
+                            f"operating state on the flanges, e.g. unit.F0.set(n=..., Xi=..., T=..., P=...)",
+                            stacklevel=4)
+
     #: names of the inlet ports; None applies the naming convention (port name ends in ``0``)
     _inlet_ports: tuple | None = None
 

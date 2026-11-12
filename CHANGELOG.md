@@ -17,6 +17,11 @@ version may notice.
 - **`CSL.separation.Flash`** – vapour–liquid flash drum (isothermal, adiabatic or with a given duty)
 - **`CSL.media.Medium_PRbase`** and `Fuel_CH4_PR`, `Fuel_MeOH_PR`, `HB_PR`, `Air_PR`, `Water_PR` – real-fluid
   media; `CSL.thermo.Thermo_PR`
+- **`CSL.reactors.ExtentReactor`** – base for reactors solved for their reaction extents: element balances
+  close by construction; energy specification `T` (isothermal) or `Q` (`Q=0` adiabatic)
+- **`CSL.reactors.HB`** – one Haber–Bosch model for isothermal, adiabatic and cooled operation (kinetics of the
+  former `HB_Adiabatic`); **`HB_1D`** – plug-flow bed integrated along its volume (profiles in `.profile`)
+- `Flange.set(n=, Xi=, T=, P=)`
 - **`celeste.HEN.HENSynthesiser`** – heat exchanger network synthesis from the pinch stream table
 - **`CSL.systems.ProcessBoxes`** – `CondenserBox`, `MethanolLoop`
 - **`RecycleMixin.Recycle_Tear`** – recycle convergence on the full tear stream (Anderson, Wegstein, direct)
@@ -103,6 +108,7 @@ version may notice.
 | Exergy of gaseous FT streams with C5+ | liquid chemical exergy with a gas dead state | gas carries the exergy of vaporisation, −R·T0·ln(Psat/P0) | `Wax` +53 kJ/mol (0.3 %), `Naphtha` +8 kJ/mol |
 | FT `RStoic.Q` | flow squared | enthalpy balance | any use of `RStoic.Q` or its `ExBs()` |
 | Equilibrium constants | empirical fits: linear Gibbs fit (MR, SOC, MeOH_WGS, Reformer with 32.115), Graaf (MeOH_Equil, MeOH_Yield) | from the NASA Gibbs energies, consistent with `h`, `s` | WGS at 450 K: 257 → 399 (fit), 378 → 399 (Graaf); within 0.6 % at SOC temperatures. Methanol loop carbon efficiency 0.9002 → 0.9087 |
+| `HB` (isothermal) | Nielsen constants of the original `HB`, outlet at the inlet temperature | constants of `HB_Adiabatic` (one rate law); isothermal at `T` | test case NH3 0.3658 → 0.3677 |
 | Reactor and SOC results | – | same roots, solver tolerance tighter | relative 1e-6 or smaller |
 
 The reference values of the original implementation are stored in
@@ -115,6 +121,8 @@ These keep working and emit a `CelesteDeprecationWarning`:
 
 | Name | Use instead |
 |---|---|
+| `HB_Adiabatic(...)` | `HB(..., Q=0)`; outlet pressure `F1_P` → pressure drop `dP` |
+| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, reactor `P`; outlet guesses `F1_n`, `F1_Xi` are ignored) | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)` |
 | `Thermo.updateBoolArr()`, `thermoArr()`, `getCoeffs()` | nothing – handled inside `calcThermoSep()` |
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |
 | `ASU.MBCheck()`, `DAC.MBCheck()` | `MBcheck()` |

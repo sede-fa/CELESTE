@@ -149,6 +149,18 @@ class Flange(Base):
     def m(self, massFlow):
         self.n = massFlow/self.mw
 
+    def set(self, n=None, Xi=None, T=None, P=None):
+        '''Set any of n, Xi, T, P in one call; returns the flange (``unit.F0.set(n=10, T=600)``).'''
+        if n is not None:
+            self.n = n
+        if P is not None:
+            self.P = P
+        if T is not None:
+            self.T = T
+        if Xi is not None:
+            self.Xi = np.asarray(Xi, dtype=float)
+        return self
+
     def get_nXTP(self):
         ''' 
         Returns array of [n, Xi, T, P] as a 1 dimensional vector

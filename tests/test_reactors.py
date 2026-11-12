@@ -2,6 +2,7 @@
 import numpy as np
 import pytest
 
+from celeste import solvers
 from celeste.CSL import electrochem, equilibrium, media, reactors
 from conftest import element_flow
 
@@ -46,19 +47,58 @@ def test_equilibrium_constants_from_nasa_gibbs_energies():
     assert float(jax.jit(lambda t: equilibrium.K_WGS(t, jnp.exp))(800.0)) == pytest.approx(equilibrium.K_WGS(800.0), rel=1e-5)
 
 
-def test_haber_bosch():
-    r = reactors.HB('r', F0_Xi=np.array([0.74, 0.25, 0.01]))
-    assert r.run_sol().success
-    np.testing.assert_allclose(r.F1.Xi, [0.4722, 0.1619, 0.3658], atol=5e-5)
-    assert_elements_conserved(r, 'HN'); assert_physical(r.F1)
+HB_FEED = np.array([0.74, 0.25, 0.01])
 
-    a = reactors.HB_Adiabatic('a', F0_Xi=np.array([0.74, 0.25, 0.01]))
+
+def test_haber_bosch_isothermal_and_adiabatic():
+    r = reactors.HB('r', T=673.15)
+    r.F0.set(n=1.0, Xi=HB_FEED, P=200.0)
+    assert r.run_sol().success
+    np.testing.assert_allclose(r.F1.Xi, [0.4709, 0.1615, 0.3677], atol=5e-5)
+    assert r.F1.T == 673.15 and r.Q < 0
+    assert_elements_conserved(r, 'HN'); assert_physical(r.F1)
+    assert r.xi[0] == pytest.approx(r.F1.n*r.F1.Xi[2] - r.F0.n*r.F0.Xi[2], rel=1e-9)
+
+    a = reactors.HB('a', Q=0.0)                                   # same model, adiabatic
     assert a.run_sol().success
     np.testing.assert_allclose(a.F1.Xi, [0.6627, 0.2246, 0.1127], atol=5e-5)
-    assert a.F1.T == pytest.approx(838.505, abs=1e-2)
-    assert a.F0.n*a.F0.h == pytest.approx(a.F1.n*a.F1.h, abs=1e-6)       # adiabatic
-    assert 0 < a.conversion < 1 and a.Sgen > 0
-    assert a.for_sol.__func__ is a.f_sol.__func__                           # former method name still works
+    assert a.F1.T == pytest.approx(838.505, abs=1e-2)             # ignited steady state
+    assert a.Q == pytest.approx(0.0, abs=1e-6) and 0 < a.conversion < 1 and a.Sgen > 0
+
+    c = reactors.HB('c', Q=-5.0)                                  # cooled bed
+    assert c.run_sol().success and c.Q == pytest.approx(-5.0, rel=1e-8) and a.F1.T > c.F1.T > 673.15
+    with pytest.warns(solvers.ConvergenceWarning):
+        assert not reactors.HB('d', Q=-50.0).run_sol().success     # duty cannot be met
+    with pytest.raises(ValueError):
+        reactors.HB('e', T=600.0, Q=0.0)
+
+
+def test_haber_bosch_former_interfaces():
+    from celeste._deprecation import CelesteDeprecationWarning
+    with pytest.warns(CelesteDeprecationWarning):
+        old = reactors.HB_Adiabatic('o', F0_Xi=HB_FEED)
+    assert isinstance(old, reactors.HB) and old.run_sol().success
+    assert old.F1.T == pytest.approx(838.505, abs=1e-2)
+    assert old.for_sol.__func__ is old.f_sol.__func__
+    with pytest.warns(CelesteDeprecationWarning):
+        legacy = reactors.HB('l', F0_n=2.0, F0_Xi=HB_FEED, P=150.0, F1_n=2.0)
+    assert (legacy.F0.n, legacy.F0.P) == (2.0, 150.0)
+
+
+def test_haber_bosch_plug_flow_bed():
+    bed = reactors.HB_1D('b', Vol=1.0)                               # adiabatic bed
+    assert bed.run_sol().success
+    assert bed.Q == pytest.approx(0.0, abs=1e-6)                     # exact energy balance
+    assert bed.F1.T == pytest.approx(838.5, abs=0.5)                 # approaches the adiabatic equilibrium
+    assert np.all(np.diff(bed.profile['T']) >= -1e-9) and np.all(np.diff(bed.profile['x_NH3']) >= -1e-12)
+    assert_elements_conserved(bed, 'HN')
+    small = reactors.HB_1D('s', Vol=1e-4)
+    small.run_sol()
+    assert 673.15 < small.F1.T < bed.F1.T
+    cooled = reactors.HB_1D('c', Vol=1.0, UA_V=0.5, T_wall=600.0)
+    cooled.run_sol()
+    assert cooled.Q == pytest.approx(cooled.Q_wall, rel=1e-6) and cooled.Q < 0 and cooled.F1.T < bed.F1.T
+    assert cooled.Exloss > 0
 
 
 @pytest.mark.parametrize('cls, x_ref', [

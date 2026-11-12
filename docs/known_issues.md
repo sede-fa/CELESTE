@@ -13,9 +13,6 @@ changed, because the right answer depends on modelling intent or on data.
 - **Reference composition of `mediaFT.Syncrude`.** Its first two entries (H2,
   CO2) are zero, so an `FT` reactor created without `F0_Xi` has no hydrogen and
   no conversion.
-- **`HB` and `HB_Adiabatic`** use the same rate expressions with different
-  constants (`alpha`, `w`, `k_2`, `K_3`). They were left as two models; if one
-  parameter set is the intended one, the rate functions can be shared.
 - **`Valve` and `Pump` defaults** (`F1_P=3.0` for a valve whose inlet default
   is 1 bar; composition defaults tied to `Fuel_CH4`) only make sense inside a
   system that overwrites them.

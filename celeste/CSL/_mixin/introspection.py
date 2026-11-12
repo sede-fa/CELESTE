@@ -171,7 +171,7 @@ class IntrospectionMixin:
             if isinstance(v, CSL.heat.Heater):
                 groups['Heaters'] += np.where(v.Q > 0, v.Exloss, 0)
                 groups['Coolers'] += np.where(v.Q < 0, v.Exloss, 0)
-            if isinstance(v, (CSL.reactors.EquilBase, CSL.reactors.HB_Adiabatic, CSL.reactors.Reformer)):
+            if isinstance(v, (CSL.reactors.EquilBase, CSL.reactors.ExtentReactor, CSL.reactors.HB_1D, CSL.reactors.Reformer)):
                 groups['Reactor'] += v.Exloss
             if isinstance(v, CSL.components.GPUbase):
                 groups['GPU'] += v.Exloss
