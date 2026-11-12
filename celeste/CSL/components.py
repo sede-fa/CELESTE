@@ -831,3 +831,53 @@ class DAC(ModelBase):
 
     def run_sol(self):
         return self.Eqs()
+
+class ChgMedium(ModelBase):
+    """
+    Hands a stream over from one medium to another (for example from a mixture
+    medium to a pure-water medium after a separator). Flow, temperature and
+    pressure are passed on; the composition is mapped by species name, where a
+    species and its condensed form count as the same ('H2O' <-> 'H2O(L)').
+    Species of the outlet medium that the inlet does not contain get zero, and
+    the outlet composition is normalised.
+
+    Parameters:
+        name:    objects name
+        Medium0: inlet medium. Defaults to media.Fuel_CH4()
+        Medium1: outlet medium. Defaults to media.Water()
+
+    Ports: F0 -> F1
+    """
+    def __init__(self, name:str, Medium0:media.Medium_Base|None=None, Medium1:media.Medium_Base|None=None):
+        Medium0 = media.Fuel_CH4() if Medium0 is None else Medium0
+        Medium1 = media.Water() if Medium1 is None else Medium1
+        super().__init__(locals())
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium0)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium1)
+
+    @staticmethod
+    def _base(species:str) -> str:
+        return str(species)[:-3] if str(species).endswith('(L)') else str(species)
+
+    def Eqs(self):
+        spX0 = {}
+        for sp, x in zip(self.F0.Medium.species, self.F0.Xi):
+            spX0[self._base(sp)] = spX0.get(self._base(sp), 0.0) + (x if x > 1e-8 else 0.0)
+        Xi = np.array([spX0.get(self._base(sp), 0.0) for sp in self.F1.Medium.species])
+        if Xi.sum() <= 0:
+            raise ValueError(f"{self.name}: the outlet medium has no species in common with the inlet")
+        self.F1.n = self.F0.n
+        self.F1.Xi = Xi/np.sum(Xi)
+        self.F1.T = self.F0.T
+        self.F1.P = self.F0.P
+
+    @property
+    def Exloss(self):
+        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex
+
+    @property
+    def Sgen(self):
+        return self.F1.s*self.F1.n - self.F0.s*self.F0.n
+
+    def run_sol(self):
+        self.Eqs()

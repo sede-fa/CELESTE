@@ -21,6 +21,13 @@ version may notice.
 - **`CSL.systems.ProcessBoxes`** – `CondenserBox`, `MethanolLoop`
 - **`RecycleMixin.Recycle_Tear`** – recycle convergence on the full tear stream (Anderson, Wegstein, direct)
 - **`celeste.solvers`** – `solve`, `solve_scalar`, `ConvergenceWarning`
+- **`celeste.CSL.exergy`** – the exergy model now lives in the base package (`ThermoExergy`,
+  `standard_chemical_exergy`, `exergy_table`). The FT module extends it (`FT.thermoFT.ThermoExergyFT`);
+  a medium chooses its model with the class attribute `ExergyModel`. `celeste.CSL` no longer imports
+  `celeste.FT`.
+- `Flange.Ex_ph`, `Flange.Ex_ch` (physical / chemical exergy), `Flange.EX` (exergy flow, kW);
+  `ThermoExergy.Ex_ph`, `Ex_ch`, `condenses`
+- `CSL.components.ChgMedium` (moved from the FT module, which now extends it)
 - `CSL.equilibrium` – equilibrium constants shared by reactors and the SOC
 - `ModelBase.inlets`, `outlets`, `mass_balance()` and a default `MBcheck()`
 - `IntrospectionMixin.get_Electric()` (was called by the reports but did not exist)
@@ -70,6 +77,8 @@ version may notice.
 | Species below a mole fraction of 1e-6 | left out of `cp`, `h`, `s` (a step at 1e-6) | included; entropy term goes smoothly to zero | ≤ 1e-6 × species value, e.g. 6e-6 kJ/mol in `h` |
 | Temperature outside the fitted range of a species | properties returned as **zero** | heat capacity frozen at the range limit, `h`, `s` continuous | large where it applies, e.g. `H2O(L)` above 600 K |
 | Liquid water as **first** species of a medium (`Water`, `Media_AEL`) | received the ideal-gas mixing/pressure entropy | no mixing or pressure entropy, as at any other position | `s`, `g`, `Sgen` at P ≠ 1 bar; exergy of liquid water at 60 bar: 11.05 → 0.90 kJ/mol |
+| Exergy of `H2O(L)` in media that also contain `H2O` (`Media_AEL`, `Steam_Water`) | gas pressure and mixing term applied to the liquid | none, as in the entropy of these media; exergy destruction now equals T0·Sgen | up to R·T0·ln(P/bar) per mol of liquid, e.g. 10 kJ/mol at 60 bar |
+| `ChgMedium` | an outlet species missing in the inlet received the `H2O(L)` fraction when the inlet contained `H2O(L)` | species mapped by name, `H2O` ↔ `H2O(L)` | only media with several species missing from the inlet |
 | `Flange.Ex` | overwrote fractions below 1e-6 in the flange with 1e-12 and relabelled FT flanges as gas | reads only | downstream values at the 1e-6 level |
 | Exergy of media with species outside the FT table (`CH3OH`, `C3H8`, …) | dead state from the FT correlation: `nan` for methanol, error for `CH3OH(L)` | dead state from the property model of the medium | methanol media now have an exergy; `media_C3`: ≤ 0.02 kJ/mol |
 | `MeOH_Kinetic` | converged to negative mole fractions for the documented example | physical solution | different outlet |
@@ -91,4 +100,5 @@ These keep working and emit a `CelesteDeprecationWarning`:
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |
 | `ASU.MBCheck()`, `DAC.MBCheck()` | `MBcheck()` |
 
-`HB.for_sol` / `HB_Adiabatic.for_sol` remain as aliases of `f_sol`.
+`celeste.FT.thermoFT.ThermoExergy` and `standard_chemical_exergy` remain importable from their old
+location and dispatch to the new classes. `HB.for_sol` / `HB_Adiabatic.for_sol` remain as aliases of `f_sol`.

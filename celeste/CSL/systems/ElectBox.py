@@ -1,6 +1,5 @@
 import numpy as np
 from celeste.CSL import media, interfaces, electrochem, heat, components, SysBase
-from celeste.FT import componentsFT as compFT
 
 '''
 1. AEL system with heaters and separators
@@ -74,7 +73,7 @@ class SOECSys(SysBase):
         self.GPU1 = components.GPU_2S(name + '.GPU1', Medium=media.Fuel_CH4(), idxSep=4)  
         self.HT_W1 = heat.Heater(name + '.HT_W1', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4L(), F1_T=T0, 
                                  F1_P=P_soc)
-        self.Chm1 = compFT.ChgMedium(name + '.ChM_1', Medium0=media.Fuel_CH4L(), Medium1=media.Water())
+        self.Chm1 = components.ChgMedium(name + '.ChM_1', Medium0=media.Fuel_CH4L(), Medium1=media.Water())
         
         self.F2 = interfaces.Flange(name + '.F2', Medium=media.Fuel_CH4())
         self.A2 = interfaces.Flange(name + '.A2', Medium=media.Air())
@@ -125,7 +124,7 @@ class SOECSysV2(SysBase):
         self.GPU1 = components.GPU_2S(name + '.GPU1', Medium=media.Fuel_CH4(), idxSep=4) # separation of water
         self.HT_W1 = heat.Heater(name + '.HT_W1', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4L(), 
                                  F1_T=T0, F1_P=P_soc) # at T0 and P_soc
-        self.Chm1 = compFT.ChgMedium(name + '.ChM_1', Medium0=media.Fuel_CH4L(), Medium1=media.Water())
+        self.Chm1 = components.ChgMedium(name + '.ChM_1', Medium0=media.Fuel_CH4L(), Medium1=media.Water())
         
         self.F2 = interfaces.Flange(name + '.F2', Medium=media.Fuel_CH4())
         self.A2 = interfaces.Flange(name + '.A2', Medium=media.Air())

@@ -166,3 +166,17 @@ def test_serialisation():
     assert h.rgetattr('F1.T') == 500.0
     h.rsetattr('F1.T', 600.0)
     assert h.F1.T == 600.0
+
+
+def test_change_of_medium():
+    c = components.ChgMedium('c', media.Fuel_CH4L(), media.Water())
+    c.F0.n, c.F0.Xi, c.F0.T = 2.0, np.array([1e-9, 0, 0, 0, 1.0, 0]), 320.0
+    c.run_sol()
+    assert c.F1.n == 2.0 and c.F1.Xi == pytest.approx([1.0]) and c.F1.T == 320.0
+    s = components.ChgMedium('s', media.Fuel_CH4L(), media.Steam())       # H2O(L) maps onto H2O
+    s.F0.Xi = np.array([0, 0, 0, 0, 1.0, 0])
+    s.run_sol()
+    assert s.F1.Xi == pytest.approx([1.0])
+    bad = components.ChgMedium('b', media.Air(), media.Water())
+    with pytest.raises(ValueError, match='no species in common'):
+        bad.run_sol()

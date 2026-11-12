@@ -393,55 +393,22 @@ class GPU_3S(comp.GPUbase):
         sol = spo.least_squares(self.f_sol, x0)
         return sol   
     
-class ChgMedium(ModelBase):
+class ChgMedium(comp.ChgMedium):
     '''
-    class that changes the medium of a given flange. if using media than don't add a a phase. If using mediaFT then add a phase
-    Input:
-    F0_n: inlet mol flow
-    F0_Xi: inlet molar composition
-    F0_T: the inlet temperature in K
-    F1_T: must be the same temperature as the inlet
-    F0_P: the inlet pressure in bar
-    F1_P: must be the same pressure as the inlet
-    Medium0: the inlet Medium. Default 'media.Fuel_CH4()'
-    Medium1: the outlet wanted Medium. Default 'Syncrude()'
-    phase0: the inlet phase. Default 'Gas'
-    phase1: the outlet phase. Default 'Gas'. must be the same phase as the inlet
+    ChgMedium of the standard library with FT defaults: inlet media.Fuel_CH4(), outlet mediaFT.Syncrude().
+    Give phase0 / phase1 to use FT flanges (with a phase) on that side.
     '''
-    def __init__(self, name:str, Medium0:media.Medium_Base=media.Fuel_CH4(), Medium1:media.Medium_Base=mediaFT.Syncrude(), phase0:Literal['Gas', 'Liquid', None]=None, 
-                 phase1:Literal['Gas', 'Liquid', None]=None): 
-        super().__init__(locals())
-        
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium0) if phase0==None else interFT.Flange(name + '.F0', Medium=Medium0, phase=phase0)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium1) if phase1==None else interFT.Flange(name + '.F1', Medium=Medium1, phase=phase1)
-          
-    def Eqs(self):
-        spX0 = dict(zip(self.F0.Medium.species, self.F0.Xi))
-        Xi = np.zeros((self.F1.Medium.nX))
-        for i, var in enumerate(self.F1.Medium.species):
-            if var in spX0:
-                Xi[i] =  np.where(spX0[var] > 1e-8, spX0[var], 0)
-            elif 'H2O(L)' in spX0:
-                Xi[i] = spX0['H2O(L)']
-            else:
-                Xi[i] = 0
-                
-        self.F1.n = self.F0.n 
-        self.F1.Xi = Xi/np.sum(Xi)
-        self.F1.T = self.F0.T 
-        self.F1.P = self.F0.P
-    
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex
-    
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n
-    
-    def run_sol(self):
-        self.Eqs()    
- 
+    def __init__(self, name:str, Medium0:media.Medium_Base|None=None, Medium1:media.Medium_Base|None=None,
+                 phase0:Literal['Gas', 'Liquid', None]=None, phase1:Literal['Gas', 'Liquid', None]=None):
+        Medium0 = media.Fuel_CH4() if Medium0 is None else Medium0
+        Medium1 = mediaFT.Syncrude() if Medium1 is None else Medium1
+        super().__init__(name, Medium0=Medium0, Medium1=Medium1)
+        self.phase0, self.phase1 = phase0, phase1
+        if phase0 is not None:
+            self.F0 = interFT.Flange(name + '.F0', Medium=Medium0, phase=phase0)
+        if phase1 is not None:
+            self.F1 = interFT.Flange(name + '.F1', Medium=Medium1, phase=phase1)
+
 class CompIsent(comp.CompIsent):
     """
     Isentropic compressor extending from the CompressorFT Class. 

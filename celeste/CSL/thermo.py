@@ -685,12 +685,24 @@ class Thermo_PR:
         standard chemical exergy. Phase changes (also condensation at the dead
         state) are contained in h and s of the real fluid.
         '''
-        from ..FT.thermoFT import standard_chemical_exergy
+        from .exergy import standard_chemical_exergy
         if T0 is not None and T0 != self.T0:
             raise NotImplementedError("the standard chemical exergies are tabulated for T0 = 298.15 K only")
         ex0 = standard_chemical_exergy(tuple(self._model.eos.eos_name(s) for s in self.species))
         z = np.asarray(self._Xi, dtype=float)
         return self.h - self.T0*self.s - float(z @ (self._model.g0_i - ex0))
+
+    def exergy_parts(self):
+        '''
+        (physical, chemical) molar exergy in kJ/mol. The chemical part is the exergy of the
+        stream's composition as an ideal gas mixture at T0, P0; the physical part is the rest.
+        '''
+        from .exergy import standard_chemical_exergy
+        ex0 = standard_chemical_exergy(tuple(self._model.eos.eos_name(s) for s in self.species))
+        z = np.asarray(self._Xi, dtype=float)
+        pos = z > 0
+        ex_ch = float(z @ ex0 + self.R*self.T0*np.sum(np.where(pos, z*np.log(np.where(pos, z, 1.0)), 0.0)))
+        return self.exergy() - ex_ch, ex_ch
 
     def __copy__(self):
         return Thermo_PR(self.species, self._T, self._Xi, self._P, self._phase, self._kij)

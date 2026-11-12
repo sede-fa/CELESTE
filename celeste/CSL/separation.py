@@ -18,9 +18,9 @@ from .thermo import _PRModel
 
 def _liquid_medium(Medium):
     """NASA medium for the liquid outlet: species with liquid-phase data switch to it ('H2O' -> 'H2O(L)')."""
-    from ..FT.thermoFT import _exergy_table
+    from .exergy import exergy_table
     known = set(_nasa.species_names())
-    with_exergy = set(_exergy_table().index)
+    with_exergy = set(exergy_table().index)
     species = []
     for s in Medium.species:
         liquid = f'{s}(L)'

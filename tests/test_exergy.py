@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from celeste.CSL import interfaces, media
+from celeste.CSL import exergy
 from celeste.FT import thermoFT
 
 
@@ -10,7 +11,7 @@ def _flange(name, row):
     return interfaces.Flange('f', getattr(media, name)(), n=1.0, Xi=np.array(row['X']), T=row['T'], P=row['P'])
 
 
-@pytest.mark.parametrize('name', ['Air', 'Atm_Air', 'Fuel_CH4', 'Fuel_CH4L', 'HB', 'Media_AEL', 'Steam', 'Steam_Water'])
+@pytest.mark.parametrize('name', ['Air', 'Atm_Air', 'Fuel_CH4', 'Fuel_CH4L', 'HB', 'Steam'])
 def test_exergy_matches_original(golden, name):
     for row in golden['media'][name]:
         f = _flange(name, row)
@@ -50,10 +51,78 @@ def test_exergy_does_not_modify_the_stream():
     assert f.h == h and f.T == 700.0 and f.P == 3.0
 
 
+@pytest.mark.parametrize('name', ['Media_AEL', 'Steam_Water'])
+def test_liquid_water_next_to_steam(golden, name):
+    """Media with H2O and H2O(L): the liquid no longer gets a gas pressure / mixing term in the exergy."""
+    worst = 0.0
+    for row in golden['media'][name]:
+        f = _flange(name, row)
+        if f.Medium.in_range:
+            worst = max(worst, abs(f.Ex - row['ex']))
+    assert 0 < worst < 8.314462618e-3*298.15*np.log(60.0) + 0.1      # at most the old pressure term at 60 bar
+
+
+@pytest.mark.parametrize('name', ['Air', 'Fuel_CH4', 'Fuel_CH4L', 'Fuel_MeOH', 'HB', 'Media_AEL', 'Steam_Water', 'media_C3'])
+def test_exergy_and_entropy_are_consistent(name):
+    """Gouy-Stodola: between two states of equal composition, dEx = dh - T0 ds (no condensation at the dead state)."""
+    rng = np.random.default_rng(3)
+    cls = getattr(media, name)
+    for _ in range(5):
+        x = rng.dirichlet(np.ones(cls().nX))
+        if 'H2O' in cls().species:
+            x[cls().species.index('H2O')] = 0.01
+            x /= x.sum()
+        a = interfaces.Flange('a', cls(), Xi=x, T=rng.uniform(300, 590), P=rng.uniform(1, 50))
+        b = interfaces.Flange('b', cls(), Xi=x, T=rng.uniform(300, 590), P=rng.uniform(1, 50))
+        if a.ExergyObj.condenses:
+            continue
+        assert b.Ex - a.Ex == pytest.approx(b.h - a.h - exergy.T0*(b.s - a.s), abs=1e-9)
+
+
+def test_exergy_destruction_equals_T0_times_entropy_generation():
+    from celeste.CSL import flow, components
+    m = flow.Mixer('m', media.Fuel_CH4(), F0_n=1.0, F1_n=2.0, F0_Xi=np.array([0.5, 0.2, 0.1, 0.1, 0.01, 0.09]),
+                   F1_Xi=np.array([0.1, 0.1, 0.3, 0.3, 0.01, 0.19]))
+    m.F0.T, m.F1.T = 400.0, 700.0
+    m.run_sol()
+    assert m.Exloss == pytest.approx(exergy.T0*m.Sgen, rel=1e-6)
+    v = components.Valve('v', media.Air(), Xi=np.array([0.21, 0.79]), F0_T=400.0, F0_P=10.0, F1_P=2.0)
+    v.run_sol()
+    assert v.Exloss == pytest.approx(exergy.T0*v.Sgen, rel=1e-9)
+
+
+def test_exergy_breakdown():
+    x = np.array([0.5, 0.1, 0.1, 0.1, 0.01, 0.19])          # dry enough not to condense at the dead state
+    f = interfaces.Flange('f', media.Fuel_CH4(), n=2.0, Xi=x, T=800.0, P=5.0)
+    assert f.Ex == pytest.approx(f.Ex_ph + f.Ex_ch) and f.EX == pytest.approx(2.0*f.Ex)
+    assert f.Ex_ph > 0 and f.Ex_ch > 0
+    dead = interfaces.Flange('d', media.Air(), T=298.15, P=1.0)
+    assert dead.Ex_ph == pytest.approx(0.0, abs=1e-12)
+    pr = interfaces.Flange('p', media.Fuel_CH4_PR(), Xi=x, T=800.0, P=5.0)
+    assert pr.Ex_ch == pytest.approx(f.Ex_ch, abs=1e-6) and pr.Ex_ph == pytest.approx(f.Ex_ph, abs=0.02)
+
+
+def test_base_package_does_not_need_the_ft_module():
+    import subprocess, sys
+    code = ("import sys, numpy as np; from celeste.CSL import media, interfaces, separation, reactors; "
+            "from celeste.CSL.systems import ElectBox, ComponentModels, SOCsystem, ProcessBoxes; "
+            "interfaces.Flange('f', media.Fuel_CH4()).Ex; "
+            "print(any(m.startswith('celeste.FT') for m in sys.modules))")
+    out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == 'False'
+
+
+def test_ft_media_use_the_ft_exergy_model():
+    from celeste.FT import interfacesFT, mediaFT
+    f = interfacesFT.Flange('f', mediaFT.Naphtha())
+    assert isinstance(f.ExergyObj, thermoFT.ThermoExergyFT) and isinstance(f.ExergyObj, exergy.ThermoExergy)
+
+
 def test_exergy_object_api():
     m = media.Fuel_CH4()
     x = np.array([0.3, 0.1, 0.1, 0.1, 0.3, 0.1])
     ex = thermoFT.ThermoExergy(m, x, 600.0, 5.0)
+    assert isinstance(ex, exergy.ThermoExergy)
     assert ex.Ex == pytest.approx(ex.streamPhysExergy() + ex.streamChemExergy())
     assert m.T == 600.0                                      # a foreign temperature is applied to the medium
     assert float(thermoFT.ThermoExergy.df.loc['H2', 'Standard Chem Exergy kJ/mol']) == pytest.approx(236.09)

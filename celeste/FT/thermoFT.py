@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from ..CSL import thermo as th
+from ..CSL import exergy as _exergy
 from ..jx import nasa as _nasa
 
 try:
@@ -13,7 +14,7 @@ except ImportError:
 
 '''
 1. Thermo: calculation of MW, LHV cp, h, s, g of a single component or stream fir FT components
-2. ThermoExergy: calculation of the stream exergy considering the physical and chemical exergy of the stream
+2. ThermoExergyFT: stream exergy for FT media (extends celeste.CSL.exergy.ThermoExergy)
 '''
 
 def _VapCalc(T, Tmin, Tmax, B, Tc, n, cpl):
@@ -392,36 +393,6 @@ class Thermo:
         return 1/Pdew
 ''' 
     
-@lru_cache(maxsize=1)
-def _exergy_table():
-    file_path = files("celeste.data").joinpath("Chem_exergies.csv").as_posix()
-    df = pd.read_csv(file_path, skipinitialspace=True)
-    df.columns = df.columns.str.strip()
-    obj_cols = df.select_dtypes(include=["object", "string"]).columns
-    df[obj_cols] = df[obj_cols].apply(lambda s: s.str.strip())
-    return df.set_index("Name")
-
-
-@lru_cache(maxsize=None)
-def standard_chemical_exergy(species: tuple) -> np.ndarray:
-    '''Standard chemical exergy [kJ/mol] at 298.15 K, 1 bar for a tuple of species names (cached).'''
-    col = _exergy_table()['Standard Chem Exergy kJ/mol']
-    missing = [sp for sp in species if sp not in col.index]
-    if missing:
-        raise KeyError(f"No standard chemical exergy tabulated for {missing} (see celeste/data/Chem_exergies.csv)")
-    out = np.array(col[list(species)], dtype=float)
-    out.setflags(write=False)
-    return out
-
-
-@lru_cache(maxsize=None)
-def _reference_nasa(species: tuple, T0: float):
-    '''(h_i, s_i) at the dead-state temperature from the NASA polynomials.'''
-    d = _nasa.nasa_data(species)
-    _, h_i, s_i = _nasa.pure_props(np, T0, d.a, d.T_break, d.T_lo, d.T_hi)
-    return h_i, s_i
-
-
 @lru_cache(maxsize=None)
 def _reference_ft(species: tuple, T0: float, P0: float, phase: str):
     '''(h_i, s_i) at the dead-state temperature from the FT property model.'''
@@ -429,123 +400,34 @@ def _reference_ft(species: tuple, T0: float, P0: float, phase: str):
     return ref.h_i, ref.s_i
 
 
-class ThermoExergy:
+class ThermoExergyFT(_exergy.ThermoExergy):
     '''
-    Molar exergy [kJ/mol] of a stream: physical + chemical part, relative to the
-    dead state T0 = 298.15 K, P0 = 1 bar with water condensing at its saturation
-    pressure ``Ps``.
+    Exergy of streams described by the FT property model (``Thermo`` of this module).
 
-    The object only reads from ``Medium`` (species list and species properties at
-    ``T``); the state of the medium is left untouched unless its temperature
-    differs from ``T``. Reference-state values and chemical exergies are cached
-    per species set, so creating this object is cheap.
+    Extends ``celeste.CSL.exergy.ThermoExergy``: only the dead-state species
+    properties come from the FT correlations instead of the NASA polynomials.
     '''
-    Ps = 0.03169 #0.03137185#
-    T0 = 298.15
-    P0 = 1 # bar
-    R =  8.314462618e-3
-
-    @th._classproperty
-    def df(cls):
-        '''Standard chemical exergy table indexed by species name (loaded on first access).'''
-        return _exergy_table()
-
     def __init__(self, Medium, Xi=None, T=None, P=None, phase='Gas'):
-        self.Medium = Medium
-        Xi = np.asarray(Xi, dtype=float)
-        self.Xi = np.where(Xi>=1e-6, Xi, 1e-12)
-        self.T = T
-        self.P = P
         self.phase = phase
-        species = tuple(str(sp) for sp in self.Medium.species)
+        super().__init__(Medium, Xi, T, P)
 
-        ## thermo at T: species values do not depend on P or Xi
-        if self.Medium.T != T:
-            self.Medium.T = T
-        self.__h_i = self.Medium.h_i
-        self.__s_i = self.Medium.s_i # s for each specie without P effect
-        ## thermo at the dead state, from the same property model as the medium
-        if isinstance(self.Medium, Thermo):
-            self.__h0_i, self.__s0_i = _reference_ft(species, self.T0, self.P0, phase)
-        else:
-            self.__h0_i, self.__s0_i = _reference_nasa(species, self.T0)
-        ### thermo of liquid water at T0
-        h0_w, s0_w = _reference_nasa(('H2O(L)',), self.T0)
-        self.__h0__H2OL = h0_w[0]
-        self.__s0__H2OL = s0_w[0]
+    def reference_props(self, species: tuple):
+        return _reference_ft(species, self.T0, self.P0, self.phase)
 
-        self.__x_00_H2O = self.Ps/self.P0 # Raoult's law
 
-        self.__H2O = species.index('H2O') if 'H2O' in species else None         # only for steam
-        self.__H2OL = species.index('H2O(L)') if 'H2O(L)' in species else None  # only for liquid H2O
-        # standard chemical exergy [kJ/mol] at 298.15 and 100 kPa from Baehr, 2012, 'Thermodynamik' --> changed to another source
-        # For alkanes from C5-C50 it is calculated with the h°f(l) and s°f(l)
-        self.__stEx = standard_chemical_exergy(species)
-        self.__stEx_H2OL = standard_chemical_exergy(('H2O(L)',))[0]
+class ThermoExergy(ThermoExergyFT):
+    '''
+    Former location of the exergy model, kept for existing code: returns a
+    ``ThermoExergyFT`` for FT media and a ``celeste.CSL.exergy.ThermoExergy`` otherwise.
+    '''
+    def __new__(cls, Medium, Xi=None, T=None, P=None, phase='Gas'):
+        if isinstance(Medium, Thermo):
+            return ThermoExergyFT(Medium, Xi, T, P, phase)
+        return _exergy.ThermoExergy(Medium, Xi, T, P)
 
-    @property
-    def Ex(self):
-        return self.streamPhysExergy() + self.streamChemExergy()
 
-    def _dead_state_split(self):
-        '''Gas composition x_0 and phase split (n_V, n_L, n_H2O) when steam condenses at the dead state.'''
-        if self.Xi[self.__H2O] == 1:
-            x_0 = self.Xi
-        else:
-            x_0 = self.Xi*(1-self.__x_00_H2O)/(1 - self.Xi[self.__H2O])
-            x_0[self.__H2O] = self.__x_00_H2O
-        n_V = (1 - self.Xi[self.__H2O])/(1 - self.__x_00_H2O) # Ratio of stream that is in gas/vapour phase at dead state
-        n_L = 1 - n_V # Ratio of stream that condenses at dead state conditions
-        n_H2O = n_L + n_V*x_0[self.__H2O]
-        return x_0, n_V, n_L, n_H2O
+_exergy_table = _exergy.exergy_table
+standard_chemical_exergy = _exergy.standard_chemical_exergy
 
-    def streamPhysExergy(self):
-        if self.__H2O is not None: # steam
-            # For gas mixtures with steam, there is steam condensation at the dead state conditions
-            # Therefore need to normalise other gases to new water composition
-            if self.Xi[self.__H2O] <= self.__x_00_H2O: # When water fraction is less than saturation, no condensation
-                # Calculate enthalpy and entropy change of each species
-                dH_T_i = self.__h_i - self.__h0_i
-                dS_TP_i = self.__s_i - self.__s0_i - self.R*np.log(self.P)
-            else: # When water fraction is more than saturation, condensation will occur
-                # Calculate gas phase composition at dead state
-                x_0, n_V, n_L, n_H2O = self._dead_state_split()
-                # Calculate enthalpy and entropy change of each species
-                dH_T_i = self.__h_i - self.__h0_i
-                dS_TP_i = self.__s_i - self.__s0_i - self.R*np.log(self.Xi*self.P/x_0, where=(x_0>=1e-6), out=np.zeros_like(self.Xi))
-                dH_T_i[self.__H2O]  = (n_H2O*self.__h_i[self.__H2O] - n_L*self.__h0__H2OL - x_0[self.__H2O]*n_V*self.__h0_i[self.__H2O])/n_H2O
-                dS_TP_i[self.__H2O] =  (n_H2O*(self.__s_i[self.__H2O] - self.R*np.log(n_H2O*self.P)) - n_L*self.__s0__H2OL -
-                                      x_0[self.__H2O]*n_V*(self.__s0_i[self.__H2O] - self.R*np.log(x_0[self.__H2O])) )/n_H2O
-        else:
-            # For gas mixtures that do not contain steam, there is no condensation (need to modify for gasses that do condense)
-            # Calculate enthalpy and entropy change of each species
-            dS_TP_i = self.__s_i - self.__s0_i  - self.R*np.log(self.P)
-            dH_T_i = self.__h_i - self.__h0_i
-            if self.__H2OL is not None: # entropy not affected by pressure
-                dS_TP_i[self.__H2OL] = self.__s_i[self.__H2OL] - self.__s0__H2OL
-
-        # Calculate Physical Exergy
-        dH_T = np.dot(self.Xi, dH_T_i)
-        dS_TP = np.dot(self.Xi, dS_TP_i)
-        Ex_ph = dH_T - self.T0*dS_TP
-        return Ex_ph
-
-    def streamChemExergy(self):
-        if self.__H2O is not None:
-            if self.Xi[self.__H2O] <= self.__x_00_H2O:
-                x_0 = self.Xi
-                # Calculate Chemical Exergy
-                Ex_ch_i = self.__stEx + self.R*self.T0*np.log(x_0, where=(x_0>=1e-6), out=np.zeros_like(x_0))
-            else:
-                x_0, n_V, n_L, n_H2O = self._dead_state_split()
-                # Calculate Chemical Exergy
-                Ex_ch_i = self.__stEx + self.R*self.T0*np.log(x_0, where=(x_0>=1e-6), out=np.zeros_like(x_0))
-                Ex_ch_i[self.__H2O] = (x_0[self.__H2O]*n_V*(self.__stEx[self.__H2O] + self.R*self.T0*np.log(x_0[self.__H2O])) + n_L*self.__stEx_H2OL)/n_H2O
-
-        else:
-            Ex_ch_i = self.__stEx + self.R*self.T0*np.log(self.Xi, where=(self.Xi>=1e-6), out=np.zeros_like(self.Xi))
-            if self.__H2OL is not None:
-                Ex_ch_i[self.__H2OL] = self.__stEx[self.__H2OL]
-
-        Ex_ch = np.dot(self.Xi, Ex_ch_i)
-        return Ex_ch
+# FT media use the FT exergy model
+Thermo.ExergyModel = ThermoExergyFT

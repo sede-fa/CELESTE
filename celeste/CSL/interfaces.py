@@ -9,7 +9,7 @@ import pandas as pd
 
 from . import media
 from .. import Base, solvers
-from ..FT import thermoFT as thFT
+from . import exergy as _exergy
 from ..functions import carbonFraction
 
 class Flange(Base):
@@ -169,7 +169,35 @@ class Flange(Base):
 
     @property
     def ExergyObj(self):
-        return thFT.ThermoExergy(self.Medium, self.Xi, self.T, self.P)
+        '''
+        Exergy model of the stream; the class is chosen by the medium (``Medium.ExergyModel``),
+        by default ``celeste.CSL.exergy.ThermoExergy``.
+        '''
+        model = getattr(self.Medium, 'ExergyModel', _exergy.ThermoExergy)
+        return model(self.Medium, self.Xi, self.T, self.P)
+
+    @property
+    def Ex_ph(self):
+        '''
+        Specific Physical Exergy /kJ/mol
+        '''
+        exergy = getattr(self.Medium, 'exergy_parts', None)
+        return exergy()[0] if exergy is not None else self.ExergyObj.Ex_ph
+
+    @property
+    def Ex_ch(self):
+        '''
+        Specific Chemical Exergy /kJ/mol
+        '''
+        exergy = getattr(self.Medium, 'exergy_parts', None)
+        return exergy()[1] if exergy is not None else self.ExergyObj.Ex_ch
+
+    @property
+    def EX(self):
+        '''
+        Exergy Flow /kW
+        '''
+        return self.n*self.Ex
         
     @property
     def Ex(self):

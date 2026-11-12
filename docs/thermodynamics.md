@@ -74,19 +74,45 @@ calls take about 0.1 ms for a property and 0.3 ms for a flash.
 
 `Flange.Ex` is the molar exergy (physical + chemical) relative to
 T0 = 298.15 K, P0 = 1 bar and the reference environment behind the standard
-chemical exergies in `celeste/data/Chem_exergies.csv`.
+chemical exergies in `celeste/data/Chem_exergies.csv`. `Flange.Ex_ph` and
+`Flange.Ex_ch` give the two parts, `Flange.EX` the exergy flow in kW.
 
-- **NASA and FT media** (`FT.thermoFT.ThermoExergy`): physical exergy with the
-  dead state reached at T0, P0, where steam above its saturation fraction
-  condenses; chemical exergy from the dead-state composition. Dead-state
-  properties come from the property model of the medium.
-- **Peng–Robinson media** (`Thermo_PR.exergy`):
+The model lives in `celeste.CSL.exergy`; the base package is self-contained.
 
-      ex = h − T0 s − Σ z_i (g°_i − ex°_i)
+| Medium | Exergy model |
+|---|---|
+| NASA media | `celeste.CSL.exergy.ThermoExergy` |
+| FT media | `celeste.FT.thermoFT.ThermoExergyFT` – extends the base model, dead-state properties from the FT correlations |
+| Peng–Robinson media | `Thermo_PR.exergy()` (formula below) |
 
-  with `g°_i` the Gibbs energy of the pure ideal gas at T0, P0 and `ex°_i` its
-  standard chemical exergy. Phase changes are contained in `h` and `s`.
+A medium selects its model with the class attribute `ExergyModel`; a new
+property model only has to override `reference_props()` (species enthalpy and
+entropy at T0) and, if it has its own convention for condensed species,
+`condensed()`.
 
-Both formulations agree in the ideal-gas limit (tested to 0.02 kJ/mol).
+### Definition (NASA and FT media)
+
+Per mol of stream with mole fractions x:
+
+    Ex_ph = Σ x_i [(h_i − h0_i) − T0 (s_i − s0_i − R ln P)]
+    Ex_ch = Σ x_i [ex0_i + R T0 ln x_i]
+
+- `h0_i`, `s0_i`: species values at T0 from the same property model as the stream;
+- `H2O(L)` carries no pressure and no mixing term – the same convention as the
+  entropy of the NASA media, so that the exergy destruction of a unit equals
+  T0 · Sgen (tested);
+- if the water vapour fraction exceeds its saturation value at the dead state
+  (`Ps/P0`), the excess condenses: the dead state is then a saturated gas plus
+  liquid water, and both parts are evaluated for that split
+  (`ThermoExergy.condenses`).
+
+### Peng–Robinson media
+
+    ex = h − T0 s − Σ z_i (g°_i − ex°_i)
+
+with `g°_i` the Gibbs energy of the pure ideal gas at T0, P0. Phase changes
+are contained in `h` and `s`. Both formulations agree in the ideal-gas limit
+(tested to 0.02 kJ/mol). The chemical part reported for these media is that of
+the composition as an ideal-gas mixture at T0, P0.
 
 Evaluating `Ex` does not change the stream.
