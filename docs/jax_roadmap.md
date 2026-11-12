@@ -91,6 +91,41 @@ accuracy is needed for a specific fluid, options that stay inside JAX are:
 
 `Thermo_CP` remains available for the stateful CSL models.
 
+## Equation-oriented solution
+
+Systems are solved **sequential-modular** (`seq_sol`): units run one after the
+other in flow order, recycles are torn and iterated (`Recycle_Tear`). This is
+robust and easy to debug, and it stays the default. Its limits show up in
+optimisation: every objective evaluation is a full converged flowsheet, design
+specifications need an outer loop, and derivatives come from finite
+differences.
+
+In the **equation-oriented** (EO) form all unit equations and connections are
+one system F(x) = 0, solved simultaneously by Newton's method. The plan keeps
+both and lets each do what it is good at:
+
+1. **Sequential solve for the starting point.** `seq_sol` with `Recycle_Tear`
+   gives a converged, physically sensible state for every flange. Newton's
+   method converges fast from there and slowly or not at all from a poor guess.
+2. **Assemble the residuals.** Every unit already separates its explicit
+   relations from its residuals (`Eqs`, `f_sol`), and `SysBase.connect`
+   writes the connection equations. Collecting them over the flowsheet gives
+   F(x); the recorded connections (`boundary_flanges`) say which flange values
+   are unknowns and which are fixed by the feeds.
+3. **Solve and optimise in EO.** Design specifications (a product purity, an
+   outlet temperature) become additional equations instead of outer loops, and
+   an optimiser (SLSQP, IPOPT) works on the equality-constrained problem with
+   the flowsheet equations as constraints.
+4. **JAX for the derivatives.** With the units as Equinox modules (below),
+   F(x) is a pure function: `jax.jacfwd` gives the exact Jacobian for Newton,
+   and the implicit function theorem gives exact sensitivities of the solution
+   to the design variables. This is what makes EO practical; with finite
+   differences the Jacobian of a flowsheet costs one evaluation per unknown.
+
+Steps 1 and 2 work with the present NumPy units and a finite-difference
+Jacobian, so EO can be tried before the Equinox migration is complete; step 4
+replaces the Jacobian once the units are available as pure functions.
+
 ## Suggested migration path
 
 1. **Now** – keep modelling in the CSL; use `celeste.jx` for sweeps,
@@ -109,7 +144,7 @@ accuracy is needed for a specific fluid, options that stay inside JAX are:
    - a system layer: sequential-modular composition is plain function
      composition; recycles become a fixed-point or root-finding problem with
      implicit differentiation (Optimistix provides these solvers).
-4. **Then** equation-oriented solving and gradient-based optimisation of whole
+4. **Then** equation-oriented solving (see above) and gradient-based optimisation of whole
    flowsheets become possible, and the CSL objects can turn into thin wrappers
    around the Equinox units, as `Thermo` already is around the property kernel.
 
