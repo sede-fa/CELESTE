@@ -65,8 +65,6 @@ flange `FH0` is created with `mediaFT.Water()` but commented as hydrogen.
 
 ## Packaging
 
-- `pyproject.toml` declares the licence as "Proprietary" while `LICENSE`
-  contains a permissive (BSD-style) text.
 - The repository has no version tags; the version is derived from the commit
   count (`0.0.1.devN`).
 - `.gitattributes` refers to `CELESTE2/_version.py`, which does not exist.

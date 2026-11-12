@@ -4,7 +4,8 @@ description = "Framework for conceptual process modelling and exergy analysis in
 authors = [
   { name = "Faisal Sedeqi", email = "tempest@dlr.de" },
 ]
-license = { text = "Proprietary" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
