@@ -48,10 +48,14 @@ from celeste import solvers
 class MyUnit(ModelBase):
     """One paragraph on what the unit does, then Parameters / Ports / Properties."""
 
-    def __init__(self, name, Medium, eff=1.0, F0_n=1.0, F0_Xi=None, F0_T=298.15, F0_P=1.0):
-        super().__init__(locals())                    # every argument becomes an attribute
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
+    #: default state of a stand-alone unit, per port
+    _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(P=3.0)}
+
+    def __init__(self, name, Medium, eff=1.0, **legacy):
+        super().__init__(locals())                    # every design argument becomes an attribute
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
         self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        self._init_state(legacy)                      # defaults, plus the deprecated F0_n=... keywords
 
     def Eqs(self):
         """Explicit relations, then the residual vector of the implicit ones."""
@@ -74,6 +78,30 @@ class MyUnit(ModelBase):
     @property
     def Sgen(self): ...
 ```
+
+### Design inputs and operating state
+
+Constructor arguments are **design** quantities: the medium, efficiencies,
+volumes, areas, split fractions, the model choice. The **operating state** lives
+on the flanges and is set there, both for a stand-alone unit and inside a
+system:
+
+```python
+comp = components.CompIsent('comp', media.Air(), eff=0.8)   # design
+comp.F0.set(n=10.0, T=300.0, P=1.0)                        # feed
+comp.F1.set(P=5.0)                                         # operating spec: discharge pressure
+comp.run_sol()
+```
+
+Outlet values that a unit does not compute are its specification: the outlet
+temperature of a `Heater`, the outlet pressure of a compressor. Inlet values are
+overwritten by the upstream unit once the unit is connected. `_default_state`
+gives a stand-alone unit a sensible starting point.
+
+The former state keywords (`F0_n=`, `F0_Xi=`, `F1_T=`, `F1_P=`, ...) are still
+accepted and land on the same flanges, with a `CelesteDeprecationWarning`.
+`SourceM` keeps its `F1_*` arguments: they define the source. `SOC`, `AEL`, `MR`
+and the GPU and FT units have not been migrated yet.
 
 | Member | Purpose |
 |---|---|

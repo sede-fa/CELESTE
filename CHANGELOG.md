@@ -57,6 +57,9 @@ version may notice.
 - `PinchAnalyser` accepts the stream names as index (the format of `pinch_stream_table()`).
 - `create_graph(..., save=...)`: writing the `.mmd` file can be switched off or redirected.
 - `exdest_df` groups all reactors under *Reactor* and all black-box separators under *GPU*; new row *Separation*.
+- Unit constructors take design quantities only (medium, efficiency, volume, split, model); the operating state
+  is set on the flanges (see `docs/conventions.md`). `Heater(name, Medium0)` uses `Medium0` on both sides when
+  `Medium1` is not given. The internal systems, examples and tutorial use the new style.
 - `SOC` accepts `T_soc0`, `T_soc1`, `P_soc` in addition to `Tsoc0`, `Tsoc1`.
 
 ### Fixed
@@ -127,7 +130,7 @@ These keep working and emit a `CelesteDeprecationWarning`:
 | `HB_Adiabatic(...)` | `HB(..., Q=0)`; outlet pressure `F1_P` → pressure drop `dP` |
 | `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic` | `MeOH(..., model='equilibrium' / 'yield' / 'kinetic', T=...)` |
 | `MeOH_WGS` | `MeOH(..., model='yield', Q=0)` |
-| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, reactor `P`; outlet guesses `F1_n`, `F1_Xi` are ignored) | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)` |
+| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P`; `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash` | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)`, `heater.F1.set(T=...)`, `comp.F1.set(P=...)` |
 | `Thermo.updateBoolArr()`, `thermoArr()`, `getCoeffs()` | nothing – handled inside `calcThermoSep()` |
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |
 | `ASU.MBCheck()`, `DAC.MBCheck()` | `MBcheck()` |

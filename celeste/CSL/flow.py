@@ -22,25 +22,26 @@ class Sink(ModelBase):
     '''
     2*(1+nSpecies) unknowns
     '''
-    def __init__(self, name, Medium, F0_n:float=1., F0_Xi:npt.NDArray[float] | None=None, F0_T:float=298.15, F0_P:float=1.):
+    def __init__(self, name, Medium, **legacy):
         super().__init__(locals())
 
         self.name = f'{name}[({name})]'
-        self.F0 = interfaces.Flange(self.name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
+        self.F0 = interfaces.Flange(self.name + '.F0', Medium=Medium)
+        self._init_state(legacy)
     
 class Splitter(ModelBase):
     
-    def __init__(self, name, Medium, Split=0.5, T=298.15, P=1.,
-                 F0_n=1, F0_Xi=None, 
-                 F1_n=1, F1_Xi=None, 
-                 F2_n=1, F2_Xi=None,               
-                ):
+    """Splits F0 into F1 (fraction ``Split``) and F2 (the rest) at the inlet state."""
+
+    def __init__(self, name, Medium, Split=0.5, **legacy):
         super().__init__(locals())
-        
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=T, P=P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=T, P=P)
-        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium, n=F2_n, Xi=F2_Xi, T=T, P=P)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium)
         self._split = Split
+        # former keywords T= and P= set all three ports
+        T, P = legacy.pop('T', None), legacy.pop('P', None)
+        self._init_state(self._spread(legacy, ['F0', 'F1', 'F2'], T=T, P=P))
 
     @property
     def split(self):
@@ -71,15 +72,16 @@ class Splitter(ModelBase):
 class Mixer(ModelBase):
     _inlet_ports = ('F0', 'F1')   # two feeds, one product (F2)
     
-    def __init__(self, name, Medium, T=298.15, P=1.,
-                 F0_n=1, F0_Xi=None, 
-                 F1_n=1, F1_Xi=None,            
-                ):
+    """Adiabatic mixer of the feeds F0 and F1 into F2 at the pressure of F0."""
+
+    def __init__(self, name, Medium, **legacy):
         super().__init__(locals())
-        
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=T, P=P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=T, P=P)
-        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium, T=T, P=P)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium)
+        # former keywords T= and P= set all three ports
+        T, P = legacy.pop('T', None), legacy.pop('P', None)
+        self._init_state(self._spread(legacy, ['F0', 'F1', 'F2'], T=T, P=P))
         
     def Eqs(self):
         self.F2.n = (self.F0.n + self.F1.n)

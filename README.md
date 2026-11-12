@@ -86,8 +86,10 @@ class AirCompression(SysBase):
     def __init__(self, name, n=1.0, P_out=5.0, T_out=310.0):
         super().__init__(locals())
         self.source = flow.SourceM(name + '.source', media.Air(), F1_n=n, F1_T=300.0, F1_P=1.0)
-        self.comp = components.CompIsent(name + '.comp', media.Air(), eff=0.8, F1_P=P_out)
-        self.cooler = heat.Heater(name + '.cooler', media.Air(), media.Air(), F1_T=T_out)
+        self.comp = components.CompIsent(name + '.comp', media.Air(), eff=0.8)
+        self.comp.F1.set(P=P_out)                       # operating spec on the flange
+        self.cooler = heat.Heater(name + '.cooler', media.Air(), media.Air())
+        self.cooler.F1.set(T=T_out)
         self.sink = flow.Sink(name + '.sink', media.Air())
 
     def seq_sol(self, store=False):
@@ -128,8 +130,8 @@ hen.plot_grid_diagram()
 ```python
 from celeste.CSL import media, separation
 
-drum = separation.Flash('drum', Medium=media.Fuel_CH4(), F0_n=10.0, F0_T=303.15, F0_P=20.0,
-                        F0_Xi=np.array([0.60, 0.05, 0.10, 0.05, 0.20, 1e-8]))
+drum = separation.Flash('drum', Medium=media.Fuel_CH4())
+drum.F0.set(n=10.0, T=303.15, P=20.0, Xi=np.array([0.60, 0.05, 0.10, 0.05, 0.20, 1e-8]))
 drum.run_sol()
 drum.beta          # vapour fraction: 0.802
 drum.F1, drum.F2   # gas and liquid outlet

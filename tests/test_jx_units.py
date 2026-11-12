@@ -15,14 +15,18 @@ FUEL = ideal.ideal_gas(['H2', 'CH4', 'CO2', 'CO', 'H2O', 'N2'])
 
 
 def test_heater_matches_csl():
-    ref = heat.Heater('h', media.Air(), media.Air(), F0_n=2.0, F0_Xi=X_AIR, F0_T=300.0, F1_T=800.0)
+    ref = heat.Heater('h', media.Air(), media.Air())
+    ref.F0.set(n=2.0, Xi=X_AIR, T=300.0)
+    ref.F1.set(T=800.0)
     ref.run_sol()
     out, Q = units.Heater(AIR, 800.0)(units.Stream(2.0, 300.0, 1.0, X_AIR))
     assert float(Q) == pytest.approx(ref.Q, rel=1e-10) and float(out.T) == 800.0
 
 
 def test_mixer_matches_csl():
-    ref = flow.Mixer('m', media.Air(), F0_n=1, F1_n=2)
+    ref = flow.Mixer('m', media.Air())
+    ref.F0.set(n=1)
+    ref.F1.set(n=2)
     ref.F0.T, ref.F1.T = 300.0, 600.0
     ref.run_sol()
     out = units.Mixer(AIR)(units.Stream(1.0, 300.0, 1.0, X_AIR), units.Stream(2.0, 600.0, 1.0, X_AIR))
@@ -34,7 +38,8 @@ def test_compressor():
     ideal_out, _ = units.Compressor(AIR, 5.0, 1.0)(feed)
     assert float(ideal_out.s(AIR)) == pytest.approx(float(feed.s(AIR)), abs=1e-12)        # exactly isentropic
     out, W = units.Compressor(AIR, 5.0, 0.8)(feed)
-    ref = components.CompIsent('c', media.Air(), eff=0.8, F1_P=5.0)
+    ref = components.CompIsent('c', media.Air(), eff=0.8)
+    ref.F1.set(P=5.0)
     ref.run_sol()
     assert float(W) == pytest.approx(ref.W, rel=1e-2)           # the CSL model uses a mean heat capacity
     assert float(out.T) == pytest.approx(ref.F1.T, abs=1.5)

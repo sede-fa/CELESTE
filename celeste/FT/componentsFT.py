@@ -463,8 +463,7 @@ class CompIsent(comp.CompIsent):
                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0, 
                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=3.0, 
                  ):
-        super().__init__(name, Medium=Medium, eff=eff, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P, 
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
+        super().__init__(name, Medium=Medium, eff=eff)   # FT flanges with a phase replace the CSL ones
         
         self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P, phase='Gas')
         self.F1 = interFT.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P, phase='Gas')  

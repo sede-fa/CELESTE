@@ -39,7 +39,7 @@ class Base:
     """
     def __init__(self, args):
         for k, v in args.items():  # for each key and value pair
-            if k in ('self', '__class__'):
+            if k in ('self', '__class__', 'legacy'):
                 continue
             else:
                 self.__dict__[k] = v

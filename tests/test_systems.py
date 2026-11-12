@@ -113,7 +113,8 @@ class RecycleLoop(SysBase):
     def __init__(self, name, ratio=0.6):
         super().__init__(locals())
         self.src = flow.SourceM(name + '.src', media.Air(), F1_n=1.0, F1_T=400.0)
-        self.mix = flow.Mixer(name + '.mix', media.Air(), F1_n=0.1)
+        self.mix = flow.Mixer(name + '.mix', media.Air())
+        self.mix.F1.set(n=0.1)
         self.split = flow.Splitter(name + '.split', media.Air(), Split=ratio)
         self.snk = flow.Sink(name + '.snk', media.Air())
 

@@ -20,7 +20,8 @@ class SimpleHeaterSys(SysBase):
         super().__init__(locals())
         ## initialise components with fixed parameters
         self.source = flow.SourceM(name + '.source', media.Air(), flow_in, Xi_in, T_in, P_in)
-        self.heater = heat.Heater(name + '.heater', media.Air(), media.Air(), F1_T=T_out)
+        self.heater = heat.Heater(name + '.heater', media.Air(), media.Air())
+        self.heater.F1.set(T=T_out)
         self.sink = flow.Sink(name + '.sink', media.Air())
 
     def seq_sol(self, store=False):
@@ -41,7 +42,8 @@ class SimpleCompressorSys(SysBase):
         super().__init__(locals())
         ## initialise components with fixed parameters
         self.source = flow.SourceM(name + '.source', media.Air(), flow_in, Xi_in, T_in, P_in)
-        self.compressor = components.CompIsent(name + '.compressor', media.Air(), eff=eff, F1_P=P_out)
+        self.compressor = components.CompIsent(name + '.compressor', media.Air(), eff=eff)
+        self.compressor.F1.set(P=P_out)
         self.sink = flow.Sink(name + '.sink', media.Air())
 
     def seq_sol(self, store=False):
@@ -74,8 +76,10 @@ class Ncomp(SysBase):
         self.heaters = []
 
         for i in range(self.N):
-            comp = components.CompIsent(f"{self.name}.comp{i+1}", Medium=Medium, eff=eff_comp[i], F1_P=P_comp[i])
-            heater = heat.Heater(f"{self.name}.HT{i+1}", Medium0=Medium, Medium1=Medium, F1_T=T_HT[i], F1_P=P_comp[i])
+            comp = components.CompIsent(f"{self.name}.comp{i+1}", Medium=Medium, eff=eff_comp[i])
+            comp.F1.set(P=P_comp[i])
+            heater = heat.Heater(f"{self.name}.HT{i+1}", Medium0=Medium, Medium1=Medium)
+            heater.F1.set(T=T_HT[i], P=P_comp[i])
             
             self.compressors.append(comp)
             self.heaters.append(heater)
@@ -115,8 +119,10 @@ class Ncomp(SysBase):
     def add_stage(self, eff, pressure, temp):
         """Dynamically add new compression stage"""
         self.N += 1
-        new_comp = components.CompIsent(f"{self.name}.comp{self.N}", Medium=self.Medium, eff=eff, F1_P=pressure)
-        new_heater = heat.Heater(f"{self.name}.HT{self.N}", Medium0=self.Medium, Medium1=self.Medium, F1_T=temp, F1_P=pressure)
+        new_comp = components.CompIsent(f"{self.name}.comp{self.N}", Medium=self.Medium, eff=eff)
+        new_comp.F1.set(P=pressure)
+        new_heater = heat.Heater(f"{self.name}.HT{self.N}", Medium0=self.Medium, Medium1=self.Medium)
+        new_heater.F1.set(T=temp, P=pressure)
         
         self.compressors.append(new_comp)
         self.heaters.append(new_heater)

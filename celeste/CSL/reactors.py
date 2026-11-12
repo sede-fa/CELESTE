@@ -381,7 +381,7 @@ class HB(ExtentReactor):
     Properties: Q, xi (mol NH3/s), conversion (of H2), Exloss, Exeff, Sgen
     """
     reactions = {'NH3': {'H2': -1.5, 'N2': -0.5, 'NH3': 1.0}}
-    _inlet_state = {'F0': dict(n=1.0, Xi=[0.74, 0.25, 0.01], T=673.15, P=200.0)}
+    _default_state = {'F0': dict(n=1.0, Xi=[0.74, 0.25, 0.01], T=673.15, P=200.0)}
 
     def __init__(self, name:str, Medium:media.Medium_Base=media.HB(), Vol:float=1.0, AF:float=1.0,
                  r_type:bool=True, T:float|None=None, Q:float|None=None, dP:float=0.0, **legacy):
@@ -501,7 +501,7 @@ class HB_1D(ModelBase):
         profile: DataFrame along the bed (V, xi, T, P, mole fractions)
         Q (from the outlet enthalpy), Q_wall (integrated wall heat; equal to Q), conversion, Exloss, Sgen
     """
-    _inlet_state = HB._inlet_state
+    _default_state = HB._default_state
 
     def __init__(self, name:str, Medium:media.Medium_Base=media.HB(), Vol:float=1.0, AF:float=1.0, r_type:bool=True,
                  UA_V:float=0.0, T_wall:float=673.15, dP:float=0.0, n_points:int=50, **legacy):
@@ -609,7 +609,7 @@ class MeOH(ExtentReactor):
     """
     reactions = {'MeOH': {'CO2': -1.0, 'H2': -3.0, 'CH3OH': 1.0, 'H2O': 1.0},
                  'rWGS': {'CO2': -1.0, 'H2': -1.0, 'CO': 1.0, 'H2O': 1.0}}
-    _inlet_state = {'F0': dict(n=1.0, Xi=[0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8], T=473.15, P=50.0)}
+    _default_state = {'F0': dict(n=1.0, Xi=[0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8], T=473.15, P=50.0)}
     R = 8.314462618     # J/mol/K (kinetics)
     _MODELS = ('equilibrium', 'yield', 'kinetic')
 

@@ -5,14 +5,14 @@ from . import interfacesFT as interFT
 class SourceM(flow.SourceM):  # could inherit from base source
 
     def __init__(self, name, Medium, F1_n=1, F1_Xi=None, F1_T=298.15, F1_P=1., phase='Gas'):
-        super().__init__(name, Medium, F1_n, F1_Xi, F1_T, F1_P)
+        super().__init__(name, Medium, F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
         self.F1 = interFT.Flange(self.name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P, phase=phase)
         
         
 class Sink(flow.Sink):  # could inherit from base sink
 
     def __init__(self, name, Medium, F0_n=1, F0_Xi=None, F0_T=298.15, F0_P=1., phase='Gas'):
-        super().__init__(name, Medium, F0_n, F0_Xi, F0_T, F0_P)
+        super().__init__(name, Medium)
         self.F0 = interFT.Flange(self.name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P, phase=phase)
         
       

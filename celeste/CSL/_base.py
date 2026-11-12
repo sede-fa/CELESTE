@@ -82,16 +82,18 @@ class ModelBase(Base):
         """
         return [v for _, v in self._members(Flange)]
 
-    #: default inlet state of a stand-alone unit: {'F0': dict(n=..., Xi=..., T=..., P=...)}
-    _inlet_state: dict = {}
+    #: default state of a stand-alone unit, per port: {'F0': dict(n=..., Xi=..., T=..., P=...), 'F1': dict(P=...)}.
+    #: Inlet entries are the feed; outlet entries are the operating specification (for example the outlet
+    #: pressure of a compressor) or the starting point of an iterative solve.
+    _default_state: dict = {}
 
     def _init_state(self, legacy: dict) -> None:
         '''
-        Apply the default inlet state (``_inlet_state``) and the former state keywords
-        (``F0_n``, ``F0_Xi``, ``F0_T``, ``F0_P``, ...; outlet guesses such as ``F1_n`` are ignored).
+        Apply the default state (``_default_state``) and the former state keywords
+        (``F0_n``, ``F0_Xi``, ``F0_T``, ``F0_P``, ``F1_P``, ...) to the flanges.
         The state keywords still work but are deprecated: the operating state belongs on the flanges.
         '''
-        for port, state in self._inlet_state.items():
+        for port, state in self._default_state.items():
             getattr(self, port).set(**state)
         used = []
         for key, value in legacy.items():
@@ -102,13 +104,31 @@ class ModelBase(Base):
             if value is None:
                 continue
             used.append(key)
-            if self._is_inlet(port):
-                flange.set(**{var: value})
+            flange.set(**{var: value})
         if used:
             from .._deprecation import warn_deprecated
+            example = ', '.join(f"{k.partition('_')[2]}=..." for k in used[:2])
+            port = used[0].partition('_')[0]
             warn_deprecated(f"{type(self).__name__}({', '.join(used)}=...): state keywords are deprecated; set the "
-                            f"operating state on the flanges, e.g. unit.F0.set(n=..., Xi=..., T=..., P=...)",
-                            stacklevel=4)
+                            f"operating state on the flanges, e.g. unit.{port}.set({example})",
+                            stacklevel=self._caller_level())
+
+    def _caller_level(self) -> int:
+        """``stacklevel`` that points a warning at the code that created this unit (past nested ``__init__``)."""
+        import sys
+        frame, level = sys._getframe(2), 3     # 1: warnings.warn in warn_deprecated, 2: _init_state
+        while frame is not None and frame.f_locals.get('self') is self:
+            frame, level = frame.f_back, level + 1
+        return level
+
+    @staticmethod
+    def _spread(legacy: dict, ports, **common) -> dict:
+        """Turn former keywords that applied to several ports (``T=``, ``P=``) into per-port state keywords."""
+        for var, value in common.items():
+            if value is not None:
+                for port in ports:
+                    legacy.setdefault(f'{port}_{var}', value)
+        return legacy
 
     #: names of the inlet ports; None applies the naming convention (port name ends in ``0``)
     _inlet_ports: tuple | None = None

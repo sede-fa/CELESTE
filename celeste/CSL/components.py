@@ -376,13 +376,13 @@ class Compressor(ModelBase):
         F0: flange F0
         F1: flange F1
     """
-    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=None,
-                F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=398.15, F1_P:float=3.0, 
-                ):
+    _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=398.15, P=3.0)}
+
+    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1.0, **legacy):
         super().__init__(locals())
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        self._init_state(legacy)
 
 class CompIsot(Compressor):
     """
@@ -425,12 +425,10 @@ class CompIsot(Compressor):
         F0_Xi=np.array([0.1,1e-8,1e-8,1e-8,0.9,1e-8]), F0_T=473.15, F0_P=3.0, F1_P=6.0)
 
     """
-    def __init__(self, name:str, Medium:media.Medium_Base, eff=1.,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=3.0
-                 ):
-        super().__init__(name, Medium=Medium, eff=eff, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P, 
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
+    _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=298.15, P=3.0)}
+
+    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1., **legacy):
+        super().__init__(name, Medium=Medium, eff=eff, **legacy)
         self.R = 8.314462618e-3
         
     def Eqs(self)->None:
@@ -507,12 +505,8 @@ class CompIsent(Compressor):
         F0_Xi=np.array([0.1,1e-8,1e-8,1e-8,0.9,1e-8]), F0_T=473.15, F0_P=3.0, F1_P=6.0)
 
     """
-    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=398.15, F1_P:float=3.0
-                 ):
-        super().__init__(name, Medium=Medium, eff=eff, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P, 
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
+    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1, **legacy):
+        super().__init__(name, Medium=Medium, eff=eff, **legacy)
         self.R = 8.314462618e-3
         
     def Eqs(self):
@@ -586,14 +580,19 @@ class ASU(ModelBase):
         1) Separation of air
         ASU = airseparator.ASU('ASU_example', F0_n=1013.4, P=8, T=400)
     """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Air(), T:float=298.15, n=1., 
-                    Xi:npArray[np.float64]=np.array([0.21,0.79]), F0_P=1, F1_P=8, Power=108):
+    _default_state = {'F0': dict(n=1.0, Xi=[0.21, 0.79], T=298.15, P=1.0),
+                      'F1': dict(P=8.0), 'F2': dict(P=8.0)}
 
+    def __init__(self, name:str, Medium:media.Medium_Base=media.Air(), Power:float=108, **legacy):
         super().__init__(locals())
-
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=n, Xi=Xi, T=T, P=F0_P) #Air
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=n, Xi=Xi, T=T, P=F1_P) #Nitrogen
-        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium, n=n, Xi=Xi, T=T, P=F1_P) #Oxygen
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)  # air
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)  # nitrogen
+        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium)  # oxygen
+        # former keywords: T, n, Xi of the feed; F1_P is the product pressure
+        T, n, Xi = (legacy.pop(k, None) for k in ('T', 'n', 'Xi'))
+        if 'F1_P' in legacy:
+            legacy.setdefault('F2_P', legacy['F1_P'])
+        self._init_state(self._spread(legacy, ['F0'], T=T, n=n, Xi=Xi))
 
     def Eqs(self):
         self.F1.T = self.F0.T
@@ -787,14 +786,19 @@ class DAC(ModelBase):
         1) Direct air capture to extract CO2
         DAC = components.DAC('DAC_example', F0_n=1013.4, P=1.2, T=400)
     """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Atm_Air(), T:float=298.15,n:float=1., 
-                    Xi:npArray[np.float64]=np.array([0.2114, 0.7883, 0.0003]), F0_P=1.0, F1_P=1.0, Power_el=400, Power_th=1600): #2447.8 @150 bar
+    _default_state = {'F0': dict(n=1.0, Xi=[0.2114, 0.7883, 0.0003], T=298.15, P=1.0),
+                      'F1': dict(P=1.0), 'F2': dict(P=1.0)}
 
+    def __init__(self, name:str, Medium:media.Medium_Base=media.Atm_Air(), Power_el:float=400, Power_th:float=1600,
+                 **legacy):  # 2447.8 @150 bar
         super().__init__(locals())
-
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=n, Xi=Xi, T=T, P=F0_P) #Air in
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=n, Xi=Xi, T=T, P=F1_P) #Air out
-        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium, n=n, Xi=Xi, T=T, P=F1_P) #CO2
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)  # air in
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)  # air out
+        self.F2 = interfaces.Flange(name + '.F2', Medium=Medium)  # CO2
+        T, n, Xi = (legacy.pop(k, None) for k in ('T', 'n', 'Xi'))
+        if 'F1_P' in legacy:
+            legacy.setdefault('F2_P', legacy['F1_P'])
+        self._init_state(self._spread(legacy, ['F0'], T=T, n=n, Xi=Xi))
 
     def Eqs(self):
         self.F1.T = self.F0.T

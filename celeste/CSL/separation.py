@@ -79,8 +79,7 @@ class Flash(ModelBase):
 
     def __init__(self, name:str, Medium:media.Medium_Base, MediumL:media.Medium_Base|None=None,
                  T:float|None=None, P:float|None=None, Q:float|None=None, dP:float=0.0, kij=None,
-                 T_bounds:tuple=(150.0, 1500.0),
-                 F0_n:float=1.0, F0_Xi=None, F0_T:float=298.15, F0_P:float=1.0):
+                 T_bounds:tuple=(150.0, 1500.0), **legacy):
         args = dict(locals())
         for key in ('T', 'P', 'Q'):
             args.pop(key)
@@ -100,9 +99,12 @@ class Flash(ModelBase):
         if len(MediumL.species) != len(Medium.species):
             raise ValueError(f"{name}: MediumL must list the same components as Medium, in the same order")
 
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=MediumV, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F2 = interfaces.Flange(name + '.F2', Medium=MediumL, n=0.0, Xi=F0_Xi, T=F0_T, P=F0_P)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=MediumV)
+        self.F2 = interfaces.Flange(name + '.F2', Medium=MediumL)
+        self._init_state(legacy)
+        self.F1.set(n=self.F0.n, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
+        self.F2.set(n=0.0, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
 
         self._eos = _PRModel.get(Medium.species, kij)
         self.beta = 1.0

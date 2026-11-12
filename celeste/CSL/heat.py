@@ -235,14 +235,12 @@ class Heater(ModelBase):
     
     """
     
-    def __init__(self, name:str, Medium0:media.Medium_Base, Medium1:media.Medium_Base,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=1.0,
-                 ):
+    def __init__(self, name:str, Medium0:media.Medium_Base, Medium1:media.Medium_Base|None=None, **legacy):
+        Medium1 = Medium0 if Medium1 is None else Medium1
         super().__init__(locals())
-        
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium0, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium1, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium0)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium1)
+        self._init_state(legacy)
         
     def Eqs(self):
         self.F1.n = self.F0.n

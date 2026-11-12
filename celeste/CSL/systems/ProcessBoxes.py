@@ -33,7 +33,8 @@ class CondenserBox(SysBase):
     """
     def __init__(self, name, Medium, T_cond=303.15, dP=0.0):
         super().__init__(locals())
-        self.cooler = heat.Heater(name + '.cooler', Medium0=Medium, Medium1=Medium, F1_T=T_cond)
+        self.cooler = heat.Heater(name + '.cooler', Medium0=Medium, Medium1=Medium)
+        self.cooler.F1.set(T=T_cond)
         self.drum = separation.Flash(name + '.drum', Medium=Medium, dP=dP)
         self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
         self.F1 = interfaces.Flange(name + '.F1', Medium=self.drum.F1.Medium)
@@ -85,8 +86,12 @@ class MethanolLoop(SysBase):
         if X_feed is None:
             X_feed = np.array([0.72, 1e-8, 0.20, 0.06, 1e-8, 0.02, 1e-8])     # stoichiometric number ~ 2
         self.feed = flow.SourceM(name + '.feed', gas, F1_n=n_feed, F1_Xi=np.asarray(X_feed, dtype=float), F1_T=T_feed, F1_P=P)
-        self.mix = flow.Mixer(name + '.mix', gas, F1_n=1e-6*n_feed, F1_Xi=np.asarray(X_feed, dtype=float), T=T_feed, P=P)
-        self.preheat = heat.Heater(name + '.preheat', gas, gas, F1_T=T_reac, F1_P=P)
+        self.mix = flow.Mixer(name + '.mix', gas)
+        self.mix.F0.set(T=T_feed, P=P)
+        self.mix.F1.set(n=1e-6*n_feed, Xi=np.asarray(X_feed, dtype=float), T=T_feed, P=P)
+        self.mix.F2.set(T=T_feed, P=P)
+        self.preheat = heat.Heater(name + '.preheat', gas, gas)
+        self.preheat.F1.set(T=T_reac, P=P)
         if reactor not in ('equilibrium', 'yield'):
             raise ValueError("reactor must be 'equilibrium' or 'yield'")
         self.reactor = reactors.MeOH(name + '.reactor', gas, model=reactor, Yield=Yield, T=T_reac)

@@ -81,8 +81,9 @@ def test_exergy_and_entropy_are_consistent(name):
 
 def test_exergy_destruction_equals_T0_times_entropy_generation():
     from celeste.CSL import flow, components
-    m = flow.Mixer('m', media.Fuel_CH4(), F0_n=1.0, F1_n=2.0, F0_Xi=np.array([0.5, 0.2, 0.1, 0.1, 0.01, 0.09]),
-                   F1_Xi=np.array([0.1, 0.1, 0.3, 0.3, 0.01, 0.19]))
+    m = flow.Mixer('m', media.Fuel_CH4())
+    m.F0.set(n=1.0, Xi=np.array([0.5, 0.2, 0.1, 0.1, 0.01, 0.09]))
+    m.F1.set(n=2.0, Xi=np.array([0.1, 0.1, 0.3, 0.3, 0.01, 0.19]))
     m.F0.T, m.F1.T = 400.0, 700.0
     m.run_sol()
     assert m.Exloss == pytest.approx(exergy.T0*m.Sgen, rel=1e-6)

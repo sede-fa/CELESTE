@@ -31,7 +31,9 @@ def test_flange_temperature_from_enthalpy_and_entropy():
 
 
 def test_heater():
-    h = heat.Heater('h', media.Air(), media.Air(), F0_n=1, F0_Xi=np.array([0.6, 0.4]), F1_T=800.0)
+    h = heat.Heater('h', media.Air(), media.Air())
+    h.F0.set(n=1, Xi=np.array([0.6, 0.4]))
+    h.F1.set(T=800.0)
     h.run_sol()
     assert h.Q == pytest.approx(15.5211664, rel=1e-8)            # value of the docstring example
     assert h.Q == pytest.approx(h.F1.n*h.F1.h - h.F0.n*h.F0.h)
@@ -40,7 +42,9 @@ def test_heater():
 
 
 def test_mixer_energy_and_mass_balance():
-    m = flow.Mixer('m', media.Air(), F0_n=1, F1_n=2)
+    m = flow.Mixer('m', media.Air())
+    m.F0.set(n=1)
+    m.F1.set(n=2)
     m.F0.T, m.F1.T = 300.0, 600.0
     sol = m.run_sol()
     assert sol.success
@@ -52,7 +56,8 @@ def test_mixer_energy_and_mass_balance():
 
 
 def test_splitter():
-    s = flow.Splitter('s', media.Air(), Split=0.3, F0_n=5.0)
+    s = flow.Splitter('s', media.Air(), Split=0.3)
+    s.F0.set(n=5.0)
     s.run_sol()
     assert (s.F1.n, s.F2.n) == pytest.approx((1.5, 3.5))
     assert s.Exloss == pytest.approx(0.0, abs=1e-12) and s.MBcheck() == pytest.approx(0.0, abs=1e-12)
@@ -60,7 +65,8 @@ def test_splitter():
 
 @pytest.mark.parametrize('eff', [1.0, 0.8])
 def test_isentropic_compressor(eff):
-    c = components.CompIsent('c', media.Air(), eff=eff, F1_P=5.0)
+    c = components.CompIsent('c', media.Air(), eff=eff)
+    c.F1.set(P=5.0)
     sol = c.run_sol()
     assert sol.success
     assert c.W == pytest.approx(c.F0.n*(c.F1.h - c.F0.h))
@@ -72,13 +78,16 @@ def test_isentropic_compressor(eff):
 
 
 def test_turbine_delivers_work():
-    t = components.CompIsent('t', media.Air(), eff=0.85, F0_T=900.0, F0_P=8.0, F1_P=1.0)
+    t = components.CompIsent('t', media.Air(), eff=0.85)
+    t.F0.set(T=900.0, P=8.0)
+    t.F1.set(P=1.0)
     assert t.run_sol().success
     assert t.W < 0 and t.F1.T < 900.0 and t.Sgen > 0
 
 
 def test_isothermal_compressor():
-    c = components.CompIsot('c', media.Air(), eff=0.8, F1_P=5.0)
+    c = components.CompIsot('c', media.Air(), eff=0.8)
+    c.F1.set(P=5.0)
     c.run_sol()
     assert c.F1.T == c.F0.T and c.W == pytest.approx(4.987159283, rel=1e-9) and c.Q == -c.W
     assert c.Exloss == pytest.approx(0.2*c.W, rel=1e-6)
@@ -123,12 +132,14 @@ def test_black_box_separators(syngas_x):
 
 
 def test_asu_and_dac_outlets_follow_the_inlet_temperature():
-    a = components.ASU('a', T=310.0)
+    a = components.ASU('a')
+    a.F0.set(T=310.0)
     a.run_sol()
     assert a.F1.T == a.F2.T == 310.0
     assert a.F1.n == pytest.approx(0.79) and a.W == pytest.approx(8.6043718, rel=1e-7)
     assert a.MBcheck() == pytest.approx(0.0, abs=1e-9)
-    d = components.DAC('d', T=290.0)
+    d = components.DAC('d')
+    d.F0.set(T=290.0)
     d.F0.T = 305.0
     d.run_sol()
     assert d.F0.T == 305.0 and d.F1.T == d.F2.T == 305.0      # the inlet used to be overwritten
@@ -159,7 +170,8 @@ def test_ports_and_generic_mass_balance(capsys):
 
 
 def test_serialisation():
-    h = heat.Heater('h', media.Air(), media.Air(), F1_T=500.0)
+    h = heat.Heater('h', media.Air(), media.Air())
+    h.F1.set(T=500.0)
     d = h.to_dict()
     assert d['name'] == 'h' and '__class__' not in d and d['F1']['T'] == 500.0
     assert h.to_pandas().shape[0] == 1
@@ -180,3 +192,38 @@ def test_change_of_medium():
     bad = components.ChgMedium('b', media.Air(), media.Water())
     with pytest.raises(ValueError, match='no species in common'):
         bad.run_sol()
+
+
+@pytest.mark.parametrize("make, port, var, value", [
+    (lambda **kw: heat.Heater('h', media.Air(), **kw), 'F1', 'T', 800.0),
+    (lambda **kw: components.CompIsent('c', media.Air(), **kw), 'F1', 'P', 5.0),
+    (lambda **kw: components.CompIsot('c', media.Air(), **kw), 'F0', 'T', 350.0),
+    (lambda **kw: flow.Mixer('m', media.Air(), **kw), 'F1', 'n', 2.0),
+    (lambda **kw: flow.Sink('s', media.Air(), **kw), 'F0', 'P', 4.0),
+])
+def test_former_state_keywords_still_work(make, port, var, value):
+    """F*_n/Xi/T/P keywords are deprecated but still land on the flange."""
+    from celeste._deprecation import CelesteDeprecationWarning
+    with pytest.warns(CelesteDeprecationWarning, match="set the operating state on the flanges"):
+        unit = make(**{f'{port}_{var}': value})
+    assert getattr(getattr(unit, port), var) == pytest.approx(value)
+
+
+def test_state_keyword_warning_points_at_caller():
+    from celeste._deprecation import CelesteDeprecationWarning
+    with pytest.warns(CelesteDeprecationWarning) as rec:
+        components.CompIsent('c', media.Air(), F1_P=5.0)
+    assert rec[0].filename == __file__
+
+
+def test_unknown_keyword_is_an_error():
+    with pytest.raises(TypeError, match="unexpected keyword argument 'F1_Q'"):
+        heat.Heater('h', media.Air(), F1_Q=1.0)
+
+
+def test_mixer_former_T_P_set_all_ports():
+    from celeste._deprecation import CelesteDeprecationWarning
+    with pytest.warns(CelesteDeprecationWarning):
+        m = flow.Mixer('m', media.Air(), T=400.0, P=3.0)
+    assert [f.T for f in (m.F0, m.F1, m.F2)] == [400.0] * 3
+    assert [f.P for f in (m.F0, m.F1, m.F2)] == [3.0] * 3

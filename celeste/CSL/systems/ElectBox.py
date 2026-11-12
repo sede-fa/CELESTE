@@ -20,10 +20,13 @@ class AELSys(SysBase):
         self.F1 = interfaces.Flange(name + '.F1', n=n, Xi=Xi, Medium=media.Media_AEL(), T=T_ael, P=P_ael)         
         
         self.ael = electrochem.AEL(name + '.ael', Medium=media.Media_AEL(), T=T_ael, P=P_ael, A=cellArea, Ncells=Ncells) 
-        self.HT_O1 = heat.Heater(name + '.HT_O1', Medium0=media.Media_AEL(), Medium1=media.Media_AEL(), F1_T=T0, F1_P=P0)
+        self.HT_O1 = heat.Heater(name + '.HT_O1', Medium0=media.Media_AEL(), Medium1=media.Media_AEL())
+        self.HT_O1.F1.set(T=T0, P=P0)
         self.GPU = components.GPU_3S(name + '.GPU', Medium=media.Media_AEL(), sep=Sep, F1_T=T_ael, F1_P=P_ael, F2_T=T_ael, F2_P=P_ael, F3_Xi=np.array([0,0,0,1]), F3_T=T_ael, F3_P=P_ael) 
-        self.HT_O2 = heat.Heater(name + '.HT_O2', Medium0=media.Media_AEL(), Medium1=media.Media_AEL(), F1_T=T0, F1_P=P0)       
-        self.CD_W1 = heat.Heater(name + '.CD_W1', Medium0=media.Media_AEL(), Medium1=media.Media_AEL(), F1_T=T0, F1_P=P0)  
+        self.HT_O2 = heat.Heater(name + '.HT_O2', Medium0=media.Media_AEL(), Medium1=media.Media_AEL())
+        self.HT_O2.F1.set(T=T0, P=P0)
+        self.CD_W1 = heat.Heater(name + '.CD_W1', Medium0=media.Media_AEL(), Medium1=media.Media_AEL())
+        self.CD_W1.F1.set(T=T0, P=P0)
         
         self.F2 = interfaces.Flange(name + '.F2', Medium=media.Media_AEL())
         self.O1 = interfaces.Flange(name + '.O1', Medium=media.Media_AEL()) # O2 from ael
@@ -67,12 +70,13 @@ class SOECSys(SysBase):
         
         self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, 
                                    T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells, extent=ext) 
-        self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air(), F1_T=T0, F1_P=P_soc)
-        self.HT_F2 = heat.Heater(name + '.HT_F2', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4(), F1_T=T_HT2, 
-                                 F1_P=P_soc)
+        self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air())
+        self.HT_A2.F1.set(T=T0, P=P_soc)
+        self.HT_F2 = heat.Heater(name + '.HT_F2', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4())
+        self.HT_F2.F1.set(T=T_HT2, P=P_soc)
         self.GPU1 = components.GPU_2S(name + '.GPU1', Medium=media.Fuel_CH4(), idxSep=4)  
-        self.HT_W1 = heat.Heater(name + '.HT_W1', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4L(), F1_T=T0, 
-                                 F1_P=P_soc)
+        self.HT_W1 = heat.Heater(name + '.HT_W1', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4L())
+        self.HT_W1.F1.set(T=T0, P=P_soc)
         self.Chm1 = components.ChgMedium(name + '.ChM_1', Medium0=media.Fuel_CH4L(), Medium1=media.Water())
         
         self.F2 = interfaces.Flange(name + '.F2', Medium=media.Fuel_CH4())
@@ -120,10 +124,11 @@ class SOECSysV2(SysBase):
         
         self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, 
                                    T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells, extent=ext)    
-        self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air(), F1_T=T0, F1_P=P_soc)
+        self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air())
+        self.HT_A2.F1.set(T=T0, P=P_soc)
         self.GPU1 = components.GPU_2S(name + '.GPU1', Medium=media.Fuel_CH4(), idxSep=4) # separation of water
-        self.HT_W1 = heat.Heater(name + '.HT_W1', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4L(), 
-                                 F1_T=T0, F1_P=P_soc) # at T0 and P_soc
+        self.HT_W1 = heat.Heater(name + '.HT_W1', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4L())  # at T0 and P_soc
+        self.HT_W1.F1.set(T=T0, P=P_soc)
         self.Chm1 = components.ChgMedium(name + '.ChM_1', Medium0=media.Fuel_CH4L(), Medium1=media.Water())
         
         self.F2 = interfaces.Flange(name + '.F2', Medium=media.Fuel_CH4())
@@ -169,8 +174,10 @@ class CO2Sys(SysBase):
         self.A1 = interfaces.Flange(name + '.A1', Medium=media.Air(), T=T_soc, P=P_soc) #n=na0, Xi=Xa0,        
         
         self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells, extent=ext) 
-        self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air(), F1_T=T0, F1_P=P0)
-        self.HT_F2 = heat.Heater(name + '.HT_F2', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4(), F1_T=T_HT2, F1_P=P_soc) #changed to FuelCH4     
+        self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air())
+        self.HT_A2.F1.set(T=T0, P=P0)
+        self.HT_F2 = heat.Heater(name + '.HT_F2', Medium0=media.Fuel_CH4(), Medium1=media.Fuel_CH4())  #changed to FuelCH4
+        self.HT_F2.F1.set(T=T_HT2, P=P_soc)
         
         self.F2 = interfaces.Flange(name + '.F2', Medium=media.Fuel_CH4())
         self.A2 = interfaces.Flange(name + '.A2', Medium=media.Air())
