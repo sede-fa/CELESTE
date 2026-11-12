@@ -109,7 +109,7 @@ class Mixer(ModelBase):
 
     def run_sol(self):
         """Adiabatic mixing: the outlet temperature follows from the energy balance."""
-        if np.isclose(self.F0.T, self.F1.T):
+        if np.isclose(self.F0.T, self.F1.T, rtol=1e-12, atol=0.0):   # a coarser test makes T_out jump
             self.f_sol([self.F0.T])
             return solvers.trivial_solution([self.F0.T])
 

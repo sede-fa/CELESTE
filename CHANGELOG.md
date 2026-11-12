@@ -27,7 +27,9 @@ version may notice.
   text)
 - **`celeste.HEN.HENSynthesiser`** – heat exchanger network synthesis from the pinch stream table
 - **`CSL.systems.ProcessBoxes`** – `CondenserBox`, `MethanolLoop`
-- **`RecycleMixin.Recycle_Tear`** – recycle convergence on the full tear stream (Anderson, Wegstein, direct)
+- **`RecycleMixin.Recycle_Tear`** – recycle convergence on the full tear stream (Anderson, Aitken/Steffensen,
+  Wegstein with adaptive or fixed q, direct; `n_direct` start-up passes). See `docs/recycles.md`, which also
+  covers feed–effluent heat exchangers
 - **`celeste.solvers`** – `solve`, `solve_scalar`, `ConvergenceWarning`
 - **`celeste.CSL.exergy`** – the exergy model now lives in the base package (`ThermoExergy`,
   `standard_chemical_exergy`, `exergy_table`). The FT module extends it (`FT.thermoFT.ThermoExergyFT`);
@@ -77,6 +79,8 @@ version may notice.
 
 ### Fixed
 
+- `Mixer`: two inlets within 0.001 % in temperature were treated as equal, so the outlet temperature jumped by up
+  to a few mK; this stalled recycle solvers near convergence.
 - A medium created with its own species list (`media.Fuel_CH4(species=[...], Xi=...)`) was reset to the
   default species when it was given to a flange.
 - **FT liquid phase**: setting `phase='Liquid'` on an FT flange had no effect (the phase switch was only read
@@ -148,6 +152,7 @@ These keep working and emit a `CelesteDeprecationWarning`:
 | `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic` | `MeOH(..., model='equilibrium' / 'yield' / 'kinetic', T=...)` |
 | `MeOH_WGS` | `MeOH(..., model='yield', Q=0)` |
 | state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P`; `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash`, `Valve`, `Pump` (also their `n`, `Xi`) | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)`, `heater.F1.set(T=...)`, `comp.F1.set(P=...)` |
+| `Recycle_FPI`, `Recycle_Wegstein_q`, `Recycle_Wegstein_Generic`, `Recycle_Wegstein_Generic2`, `Recycle_Steffensen`, `Recycle_Aitken`, `Recycle_Hybrid_FPI_Aitken`, `recycle_solver` | `Recycle_Tear(..., method='direct' / 'wegstein' / 'aitken')`; the wrappers converge the full tear stream, so they may take a different number of passes |
 | `Thermo.updateBoolArr()`, `thermoArr()`, `getCoeffs()` | nothing – handled inside `calcThermoSep()` |
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |
 | `ASU.MBCheck()`, `DAC.MBCheck()` | `MBcheck()` |

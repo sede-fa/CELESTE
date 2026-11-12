@@ -117,9 +117,10 @@ class MethanolLoop(SysBase):
         if store:   # the recycle closes the loop (shown in the graph; converged by run_sol)
             self.connect_seq(self.split.F1, self.mix.F1, store=True)
 
-    def run_sol(self, eps=1e-9, max_iter=300):
+    def run_sol(self, eps=1e-9, max_iter=300, method='anderson'):
         """Converge the recycle (tear stream: mixer inlet F1). Returns (passes, relative error of the tear stream)."""
-        return self.Recycle_Tear(self.split.F1, self.mix.F1, flow_method='seq_sol', eps=eps, max_iter=max_iter)
+        return self.Recycle_Tear(self.split.F1, self.mix.F1, flow_method='seq_sol', eps=eps, max_iter=max_iter,
+                                 method=method)
 
     @property
     def recycle_ratio(self):

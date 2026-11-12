@@ -130,9 +130,12 @@ class RecycleLoop(SysBase):
     ('Recycle_FPI', {}), ('Recycle_Wegstein_q', {'q': -1.0}), ('Recycle_Wegstein_Generic', {}),
     ('Recycle_Steffensen', {}), ('Recycle_Aitken', {}), ('Recycle_Hybrid_FPI_Aitken', {}),
 ])
-def test_recycle_solvers(method, kwargs, capsys):
+def test_former_recycle_solvers(method, kwargs, capsys):
+    """The former methods are wrappers of Recycle_Tear and still converge."""
+    from celeste._deprecation import CelesteDeprecationWarning
     loop = RecycleLoop('loop')
-    count, error = getattr(loop, method)(loop.split.F1, loop.mix.F1, print_err=True, **kwargs)
+    with pytest.warns(CelesteDeprecationWarning, match="Recycle_Tear"):
+        count, error = getattr(loop, method)(loop.split.F1, loop.mix.F1, print_err=True, **kwargs)
     capsys.readouterr()
     assert error < 1e-5 and count < 1000
     assert loop.split.F1.n == pytest.approx(1.5, rel=1e-4)        # 1 * 0.6 / 0.4

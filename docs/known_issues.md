@@ -12,11 +12,6 @@ Behaviour that is intended but surprising is listed in
 - **Black-box separators.** `GPU_2S` is the single-component special case of
   `GPU_2SV2`. Both are kept; a future clean-up could make `GPU_2S` a thin
   wrapper.
-- **Legacy recycle methods** (`Recycle_FPI`, `Recycle_Wegstein_*`,
-  `Recycle_Steffensen`, `Recycle_Aitken`, `Recycle_Hybrid_FPI_Aitken`)
-  accelerate the total flow only. They are kept for existing systems;
-  `Recycle_Tear` supersedes them (methanol loop: 21 passes instead of no
-  convergence after 500).
 
 ## Packaging
 
