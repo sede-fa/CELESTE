@@ -23,7 +23,8 @@ version may notice.
   former `HB_Adiabatic`); **`HB_1D`** – plug-flow bed integrated along its volume (profiles in `.profile`)
 - **`CSL.reactors.MeOH`** – one methanol reactor: `model='equilibrium' | 'yield' | 'kinetic'`, isothermal,
   adiabatic or with a given duty (replaces `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic`, `MeOH_WGS`)
-- `Flange.set(n=, Xi=, T=, P=)`
+- `Flange.set(n=, Xi=, T=, P=)`; `Flange.compatible(other)` and `Flange.incompatibility(other)` (the reason as
+  text)
 - **`celeste.HEN.HENSynthesiser`** – heat exchanger network synthesis from the pinch stream table
 - **`CSL.systems.ProcessBoxes`** – `CondenserBox`, `MethanolLoop`
 - **`RecycleMixin.Recycle_Tear`** – recycle convergence on the full tear stream (Anderson, Wegstein, direct)
@@ -64,10 +65,15 @@ version may notice.
   media, Joule–Thomson cooling for `*_PR` media). Outlet pressure from `P_out=`, `dP=` or the pressure set on `F1`.
   Stand-alone default changed to a pressure drop (3 → 1 bar; was 1 → 3 bar).
 - **`Pump(name, Medium, eff, P_out=None, dP=None)`**; a falling pressure gives a hydraulic turbine (W < 0).
+- `connect` / `connect_seq` check the species list as well as the flange and medium type, and the error names
+  the reason. Flanges compare by identity (`==` used to mean "same flange and medium type"), so they can be
+  used in sets and as dictionary keys.
 - `SOC` accepts `T_soc0`, `T_soc1`, `P_soc` in addition to `Tsoc0`, `Tsoc1`.
 
 ### Fixed
 
+- A medium created with its own species list (`media.Fuel_CH4(species=[...], Xi=...)`) was reset to the
+  default species when it was given to a flange.
 - **FT liquid phase**: setting `phase='Liquid'` on an FT flange had no effect (the phase switch was only read
   when the medium was built), so liquid FT streams returned gas properties. The phase can now be set and
   changed at any time; water becomes `H2O(L)`, hydrocarbons below their critical temperature become an ideal

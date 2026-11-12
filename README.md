@@ -171,7 +171,8 @@ library.
 | [docs/separation.md](docs/separation.md) | the flash model: usage, algorithm, validation, limits |
 | [docs/heat_integration.md](docs/heat_integration.md) | pinch analysis and heat exchanger network synthesis |
 | [docs/jax_roadmap.md](docs/jax_roadmap.md) | the JAX layer, Equinox units and the migration path |
-| [docs/known_issues.md](docs/known_issues.md) | open questions found during the review that need a decision |
+| [docs/known_issues.md](docs/known_issues.md) | open problems |
+| [docs/sharp_corners.md](docs/sharp_corners.md) | intended behaviour that can surprise a new user |
 | [CHANGELOG.md](CHANGELOG.md) | what changed, including everything that changes numerical results |
 
 ## Units

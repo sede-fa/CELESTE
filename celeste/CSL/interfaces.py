@@ -173,11 +173,30 @@ class Flange(Base):
     def __repr__(self):
         return self.get_nXTP().to_string()
     
-    def __eq__(self, other):
-        if type(self)==type(other) and type(self.Medium)==type(other.Medium):
-            return True
-        else:
-            return False
+    def incompatibility(self, other) -> str | None:
+        """
+        Why ``self`` cannot be connected to ``other``, or None if it can.
+
+        Two flanges are compatible when they are the same kind of port (same flange class),
+        carry the same kind of medium (same medium class) and list the same species in the
+        same order. Use ``components.ChgMedium`` to pass a stream between different media.
+        """
+        if not isinstance(other, Flange):
+            return f"{getattr(other, 'name', other)!r} is not a flange"
+        if type(self) is not type(other):
+            return f"different port types ({type(self).__name__} / {type(other).__name__})"
+        if type(self.Medium) is not type(other.Medium):
+            return f"different media ({type(self.Medium).__name__} / {type(other.Medium).__name__})"
+        sp1, sp2 = [str(x) for x in self.Medium.species], [str(x) for x in other.Medium.species]
+        if sp1 != sp2:
+            return f"different species lists ({sp1} / {sp2})"
+        return None
+
+    def compatible(self, other) -> bool:
+        """True if the two flanges can be connected (see ``incompatibility``)."""
+        return self.incompatibility(other) is None
+
+    # Flanges compare by identity (the default), so they can be used in sets and as dictionary keys.
 
     @property
     def ExergyObj(self):

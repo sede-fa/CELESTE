@@ -17,7 +17,19 @@ def test_flange_basics():
     assert table['T /K'] == 300.0 and 'Xi_O2' in table.index
     assert 'n /mol/s' in repr(f)
     g = interfaces.Flange('g', media.Air())
-    assert f == g and f != interfaces.Flange('s', media.Steam())
+    assert f.compatible(g) and not f.compatible(interfaces.Flange('s', media.Steam()))
+    assert f != g and len({f, g}) == 2                    # identity: usable in sets and as dict keys
+
+
+def test_flange_compatibility_checks_species():
+    from celeste.CSL import SysBase
+    a = interfaces.Flange('u.F1', media.Fuel_CH4())
+    b = interfaces.Flange('v.F0', media.Fuel_CH4(species=['H2', 'CH4', 'CO2', 'CO', 'H2O'], Xi=[0.2]*5))
+    assert 'species' in a.incompatibility(b)
+    c = interfaces.Flange('w.F0', media.Air())
+    assert 'different media' in a.incompatibility(c)
+    with pytest.raises(ValueError, match="different media"):
+        SysBase.connect_seq(SysBase.__new__(SysBase), a, c)
 
 
 def test_flange_temperature_from_enthalpy_and_entropy():

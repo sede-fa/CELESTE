@@ -170,6 +170,12 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
         self._core = ['name', 'self','Medium']
         self.connections = []
 
+    @staticmethod
+    def _check_connection(pin1, pin2) -> None:
+        reason = pin1.incompatibility(pin2)
+        if reason is not None:
+            raise ValueError(f"Incorrect connection between {pin1.name} and {pin2.name}: {reason}")
+
     def connect(self, pin1, pin2) -> None:
         """
         Equation-based connection: append the residuals that tie two flanges together to ``self.Eq``
@@ -179,9 +185,7 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
             ValueError: if the two pins are not of the same type / medium.
         """
         Eq = np.array([])
-        # check if correct pins
-        if pin1!=pin2: 
-            raise ValueError(f"Incorrect connection between {pin1.name} and {pin2.name}")
+        self._check_connection(pin1, pin2)
         
         for attr in pin1.__dict__.keys(): #for each flange of the other components 
             if any(k in attr for k in self._core):
@@ -201,8 +205,7 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
         direction, str = F for forward, B for backward
         '''
 
-        if pin1!=pin2:  
-            raise ValueError(f"Incorrect connection between {pin1.name} and {pin2.name}")
+        self._check_connection(pin1, pin2)
         
         if store:
             self.connections.append(['.'.join(pin1.name.split('.')[:-1]), pin1.name.split('.')[-1], pin2.name.split('.')[-1], '.'.join(pin2.name.split('.')[:-1])])

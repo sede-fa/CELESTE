@@ -89,9 +89,10 @@ class Medium_NASAbase(Medium_Base, thermo.Thermo):
 
     def __copy__(self):
         """A fresh medium of the same kind at its default state (flanges never share a medium object)."""
-        try:
-            return type(self)()
-        except TypeError:   # sub-class with required constructor arguments
+        Xi = np.array(self._reference_X, dtype=float)
+        try:   # keep a species list given to the constructor
+            return type(self)(name=self.name, species=list(self.species), Xi=Xi)
+        except TypeError:   # sub-class with another constructor signature
             return Medium_NASAbase(self.name, species=self.species, Xi=np.array(self._reference_X, dtype=float))
     
     @property
