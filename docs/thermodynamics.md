@@ -5,7 +5,7 @@
 | NASA-9 ideal gas / ideal mixture | `thermo.Thermo`, `media.Medium_NASAbase` | gas; condensed species as separate pseudo-species (`H2O(L)`) | NumPy | the default: fast, 1895 species |
 | Peng–Robinson + NASA ideal gas | `thermo.Thermo_PR`, `media.Medium_PRbase` | gas, liquid, two-phase (flash) | JAX | high pressure, condensation, separation |
 | CoolProp | `thermo.Thermo_CP`, `media.Medium_CPbase` | as specified | CoolProp | reference-quality pure fluids |
-| FT correlations | `FT.thermoFT.Thermo`, `FT.mediaFT` | gas / liquid by flag | NumPy | Fischer–Tropsch hydrocarbons up to C50 |
+| FT correlations | `FT.thermoFT.Thermo`, `FT.mediaFT` | gas / liquid set on the flange (`phase=`) | NumPy | Fischer–Tropsch hydrocarbons up to C50 |
 
 All models share the enthalpy reference of the NASA data (elements at
 298.15 K), so heat of reaction is part of `h` and energy balances may combine
@@ -70,6 +70,40 @@ Rackett correlation for liquid water and methanol instead.
 The first use of a species set compiles the property functions (2–5 s); later
 calls take about 0.1 ms for a property and 0.3 ms for a flash.
 
+## FT media
+
+The hydrocarbons C2–C50 use ideal-gas correlations linear in the carbon
+number; H2, CO, CO2, H2O, N2, CH4 use the NASA polynomials. The phase of a
+stream is set on the flange (`interfacesFT.Flange(..., phase='Liquid')` or
+`flange.phase = 'Liquid'`) and can be changed at any time.
+
+In a **liquid** stream
+
+- water is `H2O(L)` (NASA liquid water), a separate condensed phase as in the
+  NASA media: no mixing and no pressure term;
+- every hydrocarbon below its critical temperature is liquid, an ideal
+  solution: mixing term, no pressure term;
+
+      h_L = h_ig − Δh_vap          s_L = s_ig(T, 1 bar) − Δh_vap/T − R ln(Psat/1 bar)
+      cp_L = cp_ig − dΔh_vap/dT
+
+  with the Watson correlation `Δh_vap = B (1 − T/Tc)^n` (Yaws, 2014) and the
+  vapour pressure from the Clausius–Clapeyron equation, integrated over the
+  same `Δh_vap` from the normal boiling point. Below the lower limit of the
+  correlation (`HVAP_Tmin`, close to the melting point) the liquid is
+  sub-cooled with the tabulated liquid heat capacity. The vapour pressure
+  agrees with the tabulated Antoine equations within 15 %, decane at 25 °C:
+  1.8 mbar. The liquid is thermodynamically consistent with the gas
+  (`cp = dh/dT = T ds/dT`, tested);
+- hydrocarbons above their critical temperature, CH4 and the permanent gases
+  remain ideal gases (pressure and mixing term).
+
+`medium.calVAP()` returns `Δh_vap`, the entropy difference to the ideal gas at
+1 bar and `dΔh_vap/dT` of the hydrocarbons. `medium.property_species` names the
+species in the state their properties refer to (`H2O(L)` in a liquid stream).
+The FT model does not decide the phase: use a flash with Peng–Robinson media
+where the phase split matters.
+
 ## Exergy
 
 `Flange.Ex` is the molar exergy (physical + chemical) relative to
@@ -88,7 +122,8 @@ The model lives in `celeste.CSL.exergy`; the base package is self-contained.
 A medium selects its model with the class attribute `ExergyModel`; a new
 property model only has to override `reference_props()` (species enthalpy and
 entropy at T0) and, if it has its own convention for condensed species,
-`condensed()`.
+`condensed()` (no pressure, no mixing term), `solution()` (liquid solution:
+mixing, no pressure term) and `species_names()`.
 
 ### Definition (NASA and FT media)
 
@@ -97,7 +132,11 @@ Per mol of stream with mole fractions x:
     Ex_ph = Σ x_i [(h_i − h0_i) − T0 (s_i − s0_i − R ln P)]
     Ex_ch = Σ x_i [ex0_i + R T0 ln x_i]
 
-- `h0_i`, `s0_i`: species values at T0 from the same property model as the stream;
+- `h0_i`, `s0_i`: species values at T0 from the same property model as the
+  stream, in the state of the tabulated `ex0_i` – the C5+ alkanes are tabulated
+  as liquids, so their dead state is the liquid at T0 (FT media);
+- species of a liquid solution (liquid hydrocarbons of FT media) carry the
+  mixing term but no pressure term;
 - `H2O(L)` carries no pressure and no mixing term – the same convention as the
   entropy of the NASA media, so that the exergy destruction of a unit equals
   T0 · Sgen (tested);

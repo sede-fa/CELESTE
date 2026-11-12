@@ -5,27 +5,8 @@ changed, because the right answer depends on modelling intent or on data.
 
 ## Fischer–Tropsch module
 
-The FT module was restored (it could not run) and moved off Numba with
-identical numerical results. Two things in `FT/thermoFT.py` look unintended:
-
-1. **Liquid phase is not applied when the phase is set on a flange.**
-   `interfacesFT.Flange(..., phase='Liquid')` sets `Medium.phase`, but the
-   switch that selects liquid properties (`Thermo._phaseID`) is only evaluated
-   when the medium is constructed, and the media in `mediaFT` are constructed
-   as gas. Liquid FT flanges therefore return gas-phase properties. The swap of
-   `H2O` for `H2O(L)` in `getSpecies` is evaluated once at construction too.
-2. **Enthalpy of vaporisation.** `_VapCalc` uses `B*(1 - T/Tc)*n` inside the
-   valid range and `B*(1 - Tmin/Tc)**n` below it; the docstring of `calVAP`
-   gives the Watson form `B*(1 - T/Tc)**n`. The two branches do not meet at
-   `Tmin`.
-
-Fixing either changes every liquid-phase FT result. Related: `getSpecies`
-reads `species == 'H2O' and phase == 'Liquid' or phase == 'liquid'`, which
-sends *every* species to the NASA list when the phase is spelled `'liquid'`.
-
-Smaller points in `FT/reactorsFT.py`: `RStoic.Eqs` computes `Q` from
-`F0.n*F0.n` (flow squared instead of flow times enthalpy), and the feed water
-flange `FH0` is created with `mediaFT.Water()` but commented as hydrogen.
+- The FT model does not determine the phase of a stream; it evaluates the phase
+  set on the flange. A liquid flange above the bubble point is still liquid.
 
 ## Standard library
 

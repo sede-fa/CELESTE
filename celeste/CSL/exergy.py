@@ -16,6 +16,11 @@ Definitions (per mol of stream, x the mole fractions):
     Ex_ph = sum_i x_i [(h_i - h0_i) - T0 (s_i - s0_i - R ln P)]           gas species
     Ex_ch = sum_i x_i [ex0_i + R T0 ln x_i]                               gas species
     H2O(L): no pressure term and no mixing term (a separate liquid phase)
+    species of a liquid solution (``solution``): mixing term, no pressure term
+
+h0_i, s0_i refer to the species in the state of its tabulated standard chemical
+exergy ex0_i (e.g. liquid for the C5+ alkanes), so that the exergy does not
+depend on the state chosen as reference.
 
 so that Ex = h - T0 s + (terms that depend on the composition only), which
 makes the exergy destruction of a unit equal to T0 times its entropy
@@ -98,6 +103,20 @@ class ThermoExergy:
     df = _Table()       #: standard chemical exergy table (class attribute, loaded on first access)
 
     # ---- hooks for other property models --------------------------------------------------------
+    def species_names(self) -> tuple:
+        '''Names of the species in the state their properties ``h_i``, ``s_i`` refer to.'''
+        return tuple(str(sp) for sp in self.Medium.species)
+
+    def solution(self, species: tuple) -> np.ndarray:
+        '''
+        Species of an ideal liquid solution: a mixing term but no pressure term
+        (``Medium._no_pressure``; none for the NASA media).
+        '''
+        no_p = getattr(self.Medium, '_no_pressure', None)
+        if no_p is not None and len(no_p) == len(species):
+            return np.asarray(no_p) > 0
+        return np.zeros(len(species), dtype=bool)
+
     def reference_props(self, species: tuple):
         '''(h0_i, s0_i): species enthalpy and entropy at the dead-state temperature.'''
         return _nasa_reference(species, self.T0)
@@ -120,7 +139,7 @@ class ThermoExergy:
         self.Xi = np.where(Xi >= 1e-6, Xi, 1e-12)
         self.T = T
         self.P = P
-        species = tuple(str(sp) for sp in Medium.species)
+        species = self.species_names()
         self.species = species
 
         if Medium.T != T:
@@ -131,6 +150,7 @@ class ThermoExergy:
         h0_w, s0_w = _nasa_reference((self.LIQUID_WATER,), self.T0)
         self._h0_w, self._s0_w = h0_w[0], s0_w[0]
         self._liq = np.asarray(self.condensed(species), dtype=bool)
+        self._sol = np.asarray(self.solution(species), dtype=bool) & ~self._liq
         self._ex0 = standard_chemical_exergy(species)
         self._ex0_w = standard_chemical_exergy((self.LIQUID_WATER,))[0]
         self._iw = species.index(self.WATER) if self.WATER in species else None
@@ -161,7 +181,7 @@ class ThermoExergy:
     @property
     def Ex_ph(self) -> float:
         '''Physical exergy, kJ/mol'''
-        R, T0, gas = self.R, self.T0, ~self._liq
+        R, T0, gas = self.R, self.T0, ~(self._liq | self._sol)
         dH_i = self._h_i - self._h0_i
         dS_i = self._s_i - self._s0_i - np.where(gas, R*np.log(self.P), 0.0)
         if self.condenses:
@@ -179,14 +199,15 @@ class ThermoExergy:
     @property
     def Ex_ch(self) -> float:
         '''Chemical exergy, kJ/mol'''
-        R, T0, gas = self.R, self.T0, ~self._liq
+        R, T0, sol = self.R, self.T0, self._sol
+        gas = ~(self._liq | sol)
         if self.condenses:
             iw = self._iw
             x_0, n_V, n_L, n_H2O = self._dead_state_split()
-            ex_i = self._ex0 + np.where(gas, R*T0*self._ln(x_0), 0.0)
+            ex_i = self._ex0 + np.where(gas, R*T0*self._ln(x_0), 0.0) + np.where(sol, R*T0*self._ln(self.Xi), 0.0)
             ex_i[iw] = (x_0[iw]*n_V*(self._ex0[iw] + R*T0*np.log(x_0[iw])) + n_L*self._ex0_w)/n_H2O
         else:
-            ex_i = self._ex0 + np.where(gas, R*T0*self._ln(self.Xi), 0.0)
+            ex_i = self._ex0 + np.where(gas | sol, R*T0*self._ln(self.Xi), 0.0)
         return float(self.Xi @ ex_i)
 
     @property

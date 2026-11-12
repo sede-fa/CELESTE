@@ -53,6 +53,20 @@ version may notice.
 
 ### Fixed
 
+- **FT liquid phase**: setting `phase='Liquid'` on an FT flange had no effect (the phase switch was only read
+  when the medium was built), so liquid FT streams returned gas properties. The phase can now be set and
+  changed at any time; water becomes `H2O(L)`, hydrocarbons below their critical temperature become an ideal
+  liquid solution (no pressure term in the entropy). `'liquid'` spelt in lower case no longer sends every species
+  to the NASA list.
+- **FT heat of vaporisation**: `B*(1 - T/Tc)*n` replaced by the documented Watson correlation
+  `B*(1 - T/Tc)**n`; below the correlation range a sub-cooled liquid with the tabulated liquid heat capacity
+  (was `hvap(Tmin) + cpl*(T - Tmin)`, discontinuous at Tmin and of the wrong sign); the liquid entropy includes the
+  vapour pressure (Clausius–Clapeyron) and the liquid `cp` the temperature derivative of the heat of vaporisation.
+- **FT `RStoic`**: heat duty from flow × enthalpy (was `F0.n*F0.n + FH0.n*FH0.n`, flow squared).
+- **FT exergy**: the C5+ alkanes have liquid standard chemical exergies in `Chem_exergies.csv` but were referred
+  to the ideal gas at T0; their dead state is now the liquid.
+- `pyproject.toml` declares the BSD-3-Clause licence of `LICENSE` (was "Proprietary").
+
 - The package could not be installed on case-sensitive file systems (`README.md` vs `readme.md`).
 - **FT module**: `Medium_Base` overwrote the reference composition of the FT media with `None`; every FT flange
   failed. `ExBs()` methods called a non-existent `Flange.ExBs()`; `Exloss` could not be assigned.
@@ -84,6 +98,9 @@ version may notice.
 | `MeOH_Kinetic` | converged to negative mole fractions for the documented example | physical solution | different outlet |
 | `ASU`, `DAC` | `F2.T` stale; `DAC` overwrote the inlet temperature with the outlet's | both outlets at the inlet temperature | energy and exergy balance of these units |
 | `Thermo_CP.cp` | J/mol/K | kJ/mol/K, as for every other medium | factor 1000 |
+| FT streams with `phase='Liquid'` | gas properties | liquid: e.g. `Wax` at 298 K: `h` −653 → −766 kJ/mol, `cp` 0.67 → 1.05 kJ/mol/K; `Water`: −241.8 → −285.8 kJ/mol | every liquid FT stream; the `FT` reactor duty of the test case −32.628 → −32.643 kW |
+| Exergy of gaseous FT streams with C5+ | liquid chemical exergy with a gas dead state | gas carries the exergy of vaporisation, −R·T0·ln(Psat/P0) | `Wax` +53 kJ/mol (0.3 %), `Naphtha` +8 kJ/mol |
+| FT `RStoic.Q` | flow squared | enthalpy balance | any use of `RStoic.Q` or its `ExBs()` |
 | Reactor and SOC results | – | same roots, solver tolerance tighter | relative 1e-6 or smaller |
 
 The reference values of the original implementation are stored in

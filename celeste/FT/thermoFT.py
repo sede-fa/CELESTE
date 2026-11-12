@@ -165,9 +165,8 @@ class Thermo:
     def __init__(self, species, T, Xi, phase='Gas', P=1., T_unit='K'):
 
         self.species = species
-        self._phase = phase
-
-        self._phaseID = 1 if phase == 'liquid' or phase == 'Liquid' else 0
+        self._phase = self._normalise_phase(phase)
+        self._phaseID = 1 if self._phase == 'Liquid' else 0
 
         # separate NASA and HC components
         self._spFuelCH4, self._spHC = self.getSpecies()
@@ -209,10 +208,7 @@ class Thermo:
 
         self.thermoArr()
 
-        if self.__NFuelCH4 > 0:
-            self.__FuelCH4_Th = th.Thermo(self._spFuelCH4, self._T, np.zeros((self.__NFuelCH4)), self._P)
-        else:
-            self.__FuelCH4_Th = th.ThermoDum(self._T)
+        self._build_nasa_part()
 
         if self.__NHC > 0:
             self.calcThermoHC()
@@ -223,11 +219,26 @@ class Thermo:
         self.calcThermoMix()
 
     ## Methods 
+    @staticmethod
+    def _normalise_phase(phase):
+        if str(phase).lower() == 'liquid':
+            return 'Liquid'
+        if str(phase).lower() == 'gas':
+            return 'Gas'
+        raise ValueError(f"Unknown phase {phase!r}: use 'Gas' or 'Liquid'")
+
+    def _build_nasa_part(self):
+        '''NASA-polynomial part of the mixture (non-hydrocarbons and CH4); water is H2O(L) in a liquid stream.'''
+        if self.__NFuelCH4 > 0:
+            self.__FuelCH4_Th = th.Thermo(self._spFuelCH4, self._T, np.zeros((self.__NFuelCH4)), self._P)
+        else:
+            self.__FuelCH4_Th = th.ThermoDum(self._T)
+
     def getSpecies(self):
         hc = []
         fuelch4 = []
         for species in self.species:
-            if species =='H2O' and self._phase == 'Liquid' or self._phase == 'liquid':
+            if species == 'H2O' and self._phase == 'Liquid':
                 fuelch4.append('H2O(L)')
             elif species in ['H2', 'CO2', 'H2O', 'CO', 'N2', 'H2O(L)', 'CH4', 'O2', 'NH3']: 
                 fuelch4.append(species)
@@ -272,6 +283,15 @@ class Thermo:
         self.h_i = np.concatenate((self.__FuelCH4_Th.h_i, self.__HC_h)) 
         self.s_i = np.concatenate((self.__FuelCH4_Th.s_i, self.__HC_s)) 
         self.g_i = np.concatenate((self.__FuelCH4_Th.g_i, self.__HC_g)) 
+
+        # Species without a pressure term in the entropy (and the exergy):
+        #   _no_mix:      a separate condensed phase, no mixing term either (H2O(L), as in the NASA media)
+        #   _no_pressure: hydrocarbons in the liquid, an ideal solution (mixing term, no pressure term)
+        # Hydrocarbons above their critical temperature and the permanent gases stay ideal gases.
+        water = [1.0 if sp == 'H2O(L)' else 0.0 for sp in self._spFuelCH4]
+        liquid_hc = (self.__HVAP > 0).astype(float) if self.__NHC > 0 else np.zeros(0)
+        self._no_mix = np.concatenate((water, np.zeros(self.__NHC)))
+        self._no_pressure = np.concatenate((water, liquid_hc))
     
     def calcThermoMix(self):
         
@@ -279,10 +299,13 @@ class Thermo:
         X = np.asarray(self._Xi, dtype=float)
         on = X >= 1e-6
         Xa = X[on]
+        mixing = self._no_mix[on] == 0                  # ideal gas and ideal liquid solution
+        gas = self._no_pressure[on] == 0                # ideal gas only
         self.cp = np.sum(Xa*self.cp_i[on])
         self.h = np.sum(Xa*self.h_i[on])
         self.s_T = np.sum(Xa*self.s_i[on])
-        self.s = self.s_T - self.R*np.sum(Xa*np.log(Xa*self._P))
+        self.s = (self.s_T - self.R*np.sum(np.where(mixing, Xa*np.log(Xa), 0.0))
+                  - self.R*np.log(self._P)*np.sum(np.where(gas, Xa, 0.0)))
         self.g = self.h - self._T*self.s
 
     @property
@@ -299,13 +322,25 @@ class Thermo:
     
     @phase.setter
     def phase(self, ph):
+        '''Switch between 'Gas' and 'Liquid': water becomes H2O(L), hydrocarbons below Tc become liquid.'''
+        ph = self._normalise_phase(ph)
+        if ph == self._phase:
+            return
         self._phase = ph
+        self._phaseID = 1 if ph == 'Liquid' else 0
+        self._spFuelCH4, self._spHC = self.getSpecies()
+        self._build_nasa_part()
         if self.__NHC > 0:
             self.calcThermoHC()
         else: # temporary
             self.__HC_cp, self.__HC_h, self.__HC_s, self.__HC_g = np.array([]), np.array([]), np.array([]),np.array([])
         self.calcThermoSep()
         self.calcThermoMix()
+
+    @property
+    def property_species(self):
+        '''Species names in the state the properties refer to (``H2O`` is ``H2O(L)`` in a liquid stream).'''
+        return tuple(self._spFuelCH4) + tuple(self._spHC)
       
     ## Poperties
     @property
@@ -462,25 +497,50 @@ class Thermo:
 ''' 
     
 @lru_cache(maxsize=None)
-def _reference_ft(species: tuple, T0: float, P0: float, phase: str):
-    '''(h_i, s_i) at the dead-state temperature from the FT property model.'''
-    ref = Thermo(species=list(species), T=T0, Xi=np.full(len(species), 1.0/len(species)), P=P0, phase=phase)
-    return ref.h_i, ref.s_i
+def _reference_ft(species: tuple, T0: float, P0: float):
+    '''
+    (h_i, s_i) at the dead state from the FT property model, each species in the state of
+    its tabulated standard chemical exergy: the C5+ alkanes as liquid (``Phase`` L in
+    Chem_exergies.csv), the other species as ideal gas (H2O(L) as liquid water).
+    '''
+    ref = Thermo(species=list(species), T=T0, Xi=np.full(len(species), 1.0/len(species)), P=P0, phase='Gas')
+    h0, s0 = ref.h_i.copy(), ref.s_i.copy()
+    table = _exergy.exergy_table()
+    hc = list(ref._spHC)
+    if hc:
+        liquid = Thermo(species=hc, T=T0, Xi=np.full(len(hc), 1.0/len(hc)), P=P0, phase='Liquid')
+        hvap, svap, _ = liquid.calVAP()
+        ordered = list(ref._spFuelCH4) + hc
+        for k, sp in enumerate(hc):
+            if sp in table.index and str(table.loc[sp, 'Phase']).strip() == 'L':
+                i = ordered.index(sp)
+                h0[i] -= hvap[k]
+                s0[i] -= svap[k]
+    for v in (h0, s0):
+        v.setflags(write=False)
+    return h0, s0
 
 
 class ThermoExergyFT(_exergy.ThermoExergy):
     '''
     Exergy of streams described by the FT property model (``Thermo`` of this module).
 
-    Extends ``celeste.CSL.exergy.ThermoExergy``: only the dead-state species
-    properties come from the FT correlations instead of the NASA polynomials.
+    Extends ``celeste.CSL.exergy.ThermoExergy``: the dead-state species properties come
+    from the FT correlations, in the state of the tabulated chemical exergy (liquid for
+    C5+), and a liquid stream uses ``H2O(L)`` for water and an ideal liquid solution for
+    the hydrocarbons below their critical temperature (``Thermo._no_pressure``).
+    ``phase`` is accepted for compatibility; the phase is taken from the medium.
     '''
-    def __init__(self, Medium, Xi=None, T=None, P=None, phase='Gas'):
-        self.phase = phase
+    def __init__(self, Medium, Xi=None, T=None, P=None, phase=None):
         super().__init__(Medium, Xi, T, P)
+        self.phase = getattr(Medium, 'phase', phase)
+
+    def species_names(self) -> tuple:
+        names = getattr(self.Medium, 'property_species', None)
+        return tuple(names) if names is not None else super().species_names()
 
     def reference_props(self, species: tuple):
-        return _reference_ft(species, self.T0, self.P0, self.phase)
+        return _reference_ft(species, self.T0, self.P0)
 
 
 class ThermoExergy(ThermoExergyFT):
@@ -488,7 +548,7 @@ class ThermoExergy(ThermoExergyFT):
     Former location of the exergy model, kept for existing code: returns a
     ``ThermoExergyFT`` for FT media and a ``celeste.CSL.exergy.ThermoExergy`` otherwise.
     '''
-    def __new__(cls, Medium, Xi=None, T=None, P=None, phase='Gas'):
+    def __new__(cls, Medium, Xi=None, T=None, P=None, phase=None):
         if isinstance(Medium, Thermo):
             return ThermoExergyFT(Medium, Xi, T, P, phase)
         return _exergy.ThermoExergy(Medium, Xi, T, P)

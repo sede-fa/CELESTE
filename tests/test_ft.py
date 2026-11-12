@@ -7,15 +7,92 @@ from celeste.FT import componentsFT, flowFT, heatFT, interfacesFT, mediaFT, reac
 FT_MEDIA = ['Syncrude', 'Wax', 'Naphtha', 'LightGas', 'Kerosene', 'Distillate', 'Water', 'Hydrogen', 'Alkanes']
 
 
+LIGHT = {'LightGas', 'Water', 'Hydrogen'}           # no C5+ species: dead state unchanged
+
+
 @pytest.mark.parametrize('name', FT_MEDIA)
-def test_ft_properties_match_original(golden, name):
+def test_ft_gas_properties_match_original(golden, name):
+    """Gas streams: cp, h, s, LHV as in the original implementation."""
     for row in golden['ft'][name]:
+        if row['phase'] != 'Gas':
+            continue
         f = interfacesFT.Flange('f', getattr(mediaFT, name)(), T=row['T'], P=row['P'], phase=row['phase'])
         assert f.cp == pytest.approx(row['cp'], rel=1e-10)
         assert f.h == pytest.approx(row['h'], rel=1e-10)
         assert f.s == pytest.approx(row['s'], rel=1e-10)
         assert f.LHV == pytest.approx(row['lhv'], rel=1e-12)
-        assert f.Ex == pytest.approx(row['ex'], rel=1e-10)
+        if name in LIGHT:
+            assert f.Ex == pytest.approx(row['ex'], rel=1e-10)
+        else:
+            # C5+ have a liquid standard chemical exergy: the vapour now carries RT0 ln(P0/Psat) on top
+            assert f.Ex > row['ex']
+
+
+@pytest.mark.parametrize('name', ['Naphtha', 'Kerosene', 'Distillate', 'Wax'])
+def test_liquid_at_the_dead_state_has_the_tabulated_chemical_exergy(golden, name):
+    """
+    A liquid C5+ stream at T0, P0 has exactly sum x_i ex0_i + R T0 sum x_i ln x_i (the tabulated values are for the
+    liquid); the original implementation gave this number for every phase.
+    """
+    row = next(r for r in golden['ft'][name] if r['T'] == 298.15 and r['P'] == 1.0)
+    f = interfacesFT.Flange('f', getattr(mediaFT, name)(), T=298.15, P=1.0, phase='Liquid')
+    assert f.Ex == pytest.approx(row['ex'], abs=0.5)
+
+
+def test_exergy_of_vaporisation():
+    """Pure decane at T0, P0: Ex(gas) - Ex(liquid) = g_gas - g_liquid = -R T0 ln(Psat(T0)/P0)."""
+    x = np.zeros(50)
+    x[9] = 1.0                                                            # C10H22 in mediaFT.Alkanes (C1-C50)
+    gas = interfacesFT.Flange('g', mediaFT.Alkanes(), Xi=x, T=298.15, P=1.0, phase='Gas')
+    liq = interfacesFT.Flange('l', mediaFT.Alkanes(), Xi=x, T=298.15, P=1.0, phase='Liquid')
+    hvap, svap, _ = liq.Medium.calVAP()
+    lnPsat = (svap[8] - hvap[8]/298.15)/thermoFT.Thermo.R                  # hydrocarbon list starts at C2
+    assert gas.Ex - liq.Ex == pytest.approx(-thermoFT.Thermo.R*298.15*lnPsat, rel=1e-9)
+    assert np.exp(lnPsat) == pytest.approx(0.00180, rel=0.15)              # decane: 1.8 mbar at 25 °C
+
+
+@pytest.mark.parametrize('name', ['Syncrude', 'Naphtha', 'Wax', 'Water'])
+def test_liquid_exergy_obeys_gouy_stodola(name):
+    """
+    Between two states of the same composition: dEx = dh - T0 ds (phase change and pressure included). Not for a
+    gas whose water partly condenses at the dead state (Syncrude), where the exergy model splits the phases.
+    """
+    a = interfacesFT.Flange('a', getattr(mediaFT, name)(), T=320.0, P=1.0, phase='Liquid')
+    states = [(450.0, 1.0, 'Liquid'), (450.0, 30.0, 'Liquid'), (500.0, 5.0, 'Gas'), (320.0, 1.0, 'Gas')]
+    for T, P, phase in (states[:2] if name == 'Syncrude' else states):
+        b = interfacesFT.Flange('b', getattr(mediaFT, name)(), T=T, P=P, phase=phase)
+        assert b.Ex - a.Ex == pytest.approx((b.h - a.h) - 298.15*(b.s - a.s), abs=1e-8)
+
+
+def test_flange_phase_switches_the_properties():
+    """Setting the phase on an FT flange used to have no effect: liquid streams returned gas properties."""
+    f = interfacesFT.Flange('f', mediaFT.Water(), T=298.15, P=1.0, phase='Gas')
+    gas_h, gas_s = f.h, f.s
+    f.phase = 'Liquid'
+    assert f.Medium.property_species == ('H2O(L)',)
+    assert f.h == pytest.approx(-285.83, abs=0.01)                          # liquid water
+    assert gas_h - f.h == pytest.approx(44.0, abs=0.1)                      # heat of vaporisation at 25 °C
+    f.phase = 'gas'
+    assert (f.h, f.s) == (gas_h, gas_s) and f.phase == 'Gas'
+    with pytest.raises(ValueError):
+        f.Medium.phase = 'vapour-ish'
+
+
+def test_liquid_phase_spelling_only_changes_water():
+    """'liquid' used to send every species to the NASA list (operator precedence in getSpecies)."""
+    upper = interfacesFT.Flange('u', mediaFT.Syncrude(), phase='Liquid')
+    lower = interfacesFT.Flange('l', mediaFT.Syncrude(), phase='liquid')
+    assert upper.Medium.property_species == lower.Medium.property_species
+    assert upper.Medium.property_species[3] == 'H2O(L)' and 'C10H22' in upper.Medium.property_species
+    assert lower.h == upper.h
+
+
+def test_liquid_entropy_has_no_pressure_term():
+    lo = interfacesFT.Flange('lo', mediaFT.Kerosene(), T=350.0, P=1.0, phase='Liquid')
+    hi = interfacesFT.Flange('hi', mediaFT.Kerosene(), T=350.0, P=50.0, phase='Liquid')
+    assert hi.s == pytest.approx(lo.s, abs=1e-12)
+    x = lo.Xi
+    assert lo.s == pytest.approx(np.dot(x, lo.Medium.s_i) - thermoFT.Thermo.R*np.sum(x*np.log(x)), rel=1e-12)
 
 
 def test_reference_composition_is_kept():
@@ -32,7 +109,7 @@ def test_ft_reactor_and_separation():
     x[[0, 1, 2, 4]] = 0.62, 0.05, 0.30, 0.03
     r = reactorsFT.FT('r', alpha=0.85, CO_conv=0.6, F0_Xi=x)
     r.run_sol()
-    assert r.Q == pytest.approx(-32.627621, rel=1e-6)
+    assert r.Q == pytest.approx(-32.643397, rel=1e-6)          # F2 is liquid (was evaluated as gas: -32.627621)
     assert r.F0.m == pytest.approx(r.F1.m + r.F2.m, rel=1e-5)
     r.ExBs()
     assert r.Exloss > 0 and 0 < r.Exeff < 1
