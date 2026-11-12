@@ -139,6 +139,10 @@ class SOC(ModelBase):
     def Q(self):
         return self.F1.n*self.F1.h + self.A1.n*self.A1.h - self.F0.n*self.F0.h - self.A0.n*self.A0.h - self.W - self.Qloss 
     
+    def heat_and_work(self) -> float:
+        """Q + W + Qloss: ``Q`` is defined net of ``Qloss``, so the energy balance needs all three."""
+        return float(self.Q + self.W + self.Qloss)
+
     @property
     def Exth(self):
         # Qloss = 0, change Exth when Qloss is not zero

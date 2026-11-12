@@ -30,6 +30,9 @@ def test_methanol_loop(kind, efficiency, ratio):
     assert loop.carbon_efficiency == pytest.approx(efficiency, abs=2e-5)
     assert loop.recycle_ratio == pytest.approx(ratio, abs=2e-3)
     assert loop.MBcheck() == pytest.approx(0.0, abs=1e-4)
+    assert loop.EBcheck() == pytest.approx(0.0, abs=1e-6)
+    boundary = loop.boundary_flanges()                   # make-up in; liquid product and purge out
+    assert boundary['feeds'] == [loop.mix.F0] and boundary['products'] == [loop.cond.drum.F2, loop.split.F2]
     assert all(loop.get_success().values())
     product = loop.product.F0
     assert product.Xi[6] > 0.5 and product.Xi[4] > 0.4 and product.Xi[0] < 1e-3        # crude methanol: CH3OH + H2O

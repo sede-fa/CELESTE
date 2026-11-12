@@ -36,6 +36,7 @@ class RecycleMixin:
         if method not in ('anderson', 'wegstein', 'direct'):
             raise ValueError("method must be 'anderson', 'wegstein' or 'direct'")
         run = getattr(self, flow_method) if isinstance(flow_method, str) else flow_method
+        self._record_link(F_source, F_sink)
 
         def pack(f):
             return np.concatenate((f.n*np.asarray(f.Xi, dtype=float), [f.T]))

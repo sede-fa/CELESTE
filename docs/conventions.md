@@ -18,7 +18,15 @@ them too; existing user models are not affected by any of this.
 | entropy generation | `Sgen` | kJ/K/s |
 
 `Q` and `W` are positive when they **enter** the unit. Enthalpies include the
-enthalpy of formation, so reaction heat needs no separate term.
+enthalpy of formation, so reaction heat needs no separate term. The energy
+balance of every unit is therefore
+
+    sum(n·h of the inlets) + Q + W = sum(n·h of the outlets)
+
+and `unit.energy_balance()` returns the left side minus the right side.
+`unit.heat_and_work()` is what crosses the unit boundary: `Q + W` by default,
+0 for heat exchangers (their `Q` is the duty passed between the two sides) and
+`Q + W + Qloss` for the `SOC`.
 
 ## Ports
 
@@ -153,6 +161,20 @@ class MySystem(SysBase):
 - A **box** is a system with its own inlet and outlet flanges instead of
   sources and sinks (`Ncomp`, `SOECSys`, `CondenserBox`). It is used inside
   another system like a unit.
+
+### Balances over a system
+
+`connect_seq`, `connect` and `Recycle_Tear` record which flanges carry the same
+stream. After a solve, `boundary_flanges()` returns the streams that cross the
+system boundary: unit inlets not fed by another unit (`feeds`) and unit outlets
+that lead nowhere else (`products`). Sources and sinks only mark the boundary;
+the ports of a box are followed through to the units inside it. On top of that:
+
+| Method | Returns |
+|---|---|
+| `MBcheck()` | mass in − mass out over the boundary, g/s |
+| `EBcheck()` | enthalpy in + Σ(Q + W) − enthalpy out, kJ/s (`q_in`, `q_out` keep the enthalpy flows) |
+| `unit_balances()` | mass and energy residual of every unit, to find where a balance does not close |
 
 ## Media
 

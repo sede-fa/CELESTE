@@ -6,8 +6,9 @@ Behaviour that is intended but surprising is listed in
 
 ## Standard library
 
-- **`SysBase.EBcheck`** counts sources and sinks only; for boxes with their own
-  inlet and outlet flanges it does not close.
+- **`SOC.Qloss`** enters the energy balance like a heat input (`Q` is defined as
+  ΔH − W − Qloss). If `Qloss` is meant as a loss to the surroundings, its sign
+  in `SOC.Q` should be flipped; it defaults to 0, so no example is affected.
 - **Black-box separators.** `GPU_2S` is the single-component special case of
   `GPU_2SV2`. Both are kept; a future clean-up could make `GPU_2S` a thin
   wrapper.

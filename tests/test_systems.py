@@ -156,3 +156,35 @@ def test_lazy_subpackages():
     assert celeste.CSL.flow.SourceM is flow.SourceM
     with pytest.raises(AttributeError):
         celeste.CSL.does_not_exist
+
+
+def test_boundary_flanges_follow_the_connections():
+    loop = RecycleLoop('loop')
+    loop.Recycle_Tear(loop.split.F1, loop.mix.F1, eps=1e-10)
+    b = loop.boundary_flanges()
+    assert b['feeds'] == [loop.mix.F0] and b['products'] == [loop.split.F2]   # the recycle is internal
+    assert loop.MBcheck() == pytest.approx(0.0, abs=1e-10)
+    assert loop.EBcheck() == pytest.approx(0.0, abs=1e-10)
+
+
+def test_system_mass_balance_is_in_minus_out():
+    hs = ComponentModels.SimpleHeaterSys('s', 1.0, None, 300.0, 1.0, 500.0)
+    hs.run_sol()
+    hs.heater.F1.n = 0.5                                   # break the balance on purpose
+    assert hs.MBcheck() == pytest.approx(0.5*hs.heater.F0.mw)
+
+
+@pytest.mark.parametrize('make', [
+    lambda: ComponentModels.SimpleHeaterSys('s', 1.0, None, 300.0, 1.0, 500.0),
+    lambda: ComponentModels.Ncomp('train', media.Air()),
+    lambda: ElectBox.CO2Sys('box', I=-50.0, Ncells=100),
+    lambda: SOCsystem.SOCBasicSys('s', 1.0, None, 1.0, None, -50.0, 100),
+    lambda: SOCsystem.SOCsysRecupe('s', I=-50.0),             # heat exchangers: internal duty only
+])
+def test_energy_balance_closes_over_the_boundary(make):
+    s = make()
+    s.run_sol()
+    residual = s.EBcheck()
+    assert residual == pytest.approx(0.0, abs=1e-8*max(1.0, abs(s.q_in), abs(s.q_out)))
+    balances = s.unit_balances()
+    assert (balances.energy.abs() < 1e-6).all() and (balances.mass.abs() < 1e-6).all()

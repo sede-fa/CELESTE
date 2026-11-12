@@ -71,6 +71,10 @@ class HexBase(ModelBase):
         ])
         return self.Eq
     
+    def heat_and_work(self) -> float:
+        """Nothing crosses the unit boundary: ``Q`` is the duty passed from the hot to the cold side."""
+        return 0.0
+
     @property
     def Q(self):
         return self.epsilon*self.Qmax

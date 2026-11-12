@@ -152,6 +152,16 @@ class ModelBase(Base):
         """Mass flow into the unit minus mass flow out of it, g/s (no printing)."""
         return sum(f.m for f in self.inlets) - sum(f.m for f in self.outlets)
 
+    def heat_and_work(self) -> float:
+        """Heat plus work added to the unit, kJ/s (``Q`` + ``W``; a unit without them adds nothing)."""
+        return float(getattr(self, 'Q', 0.0) or 0.0) + float(getattr(self, 'W', 0.0) or 0.0)
+
+    def energy_balance(self) -> float:
+        """Enthalpy in + heat and work added - enthalpy out, kJ/s; zero when the unit's energy balance closes."""
+        H_in = sum(f.n*f.h for f in self.inlets)
+        H_out = sum(f.n*f.h for f in self.outlets)
+        return H_in - H_out + self.heat_and_work()
+
     def MBcheck(self) -> float:
         """Print the relative mass balance error and return the difference in - out, g/s."""
         m_in = sum(f.m for f in self.inlets)
@@ -169,6 +179,13 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
         self.Objs = np.array([], dtype=ModelBase)
         self._core = ['name', 'self','Medium']
         self.connections = []
+        self._links = {}
+
+    def _record_link(self, pin1, pin2) -> None:
+        """Remember that two flanges carry the same stream (used by the boundary balances)."""
+        if '_links' not in self.__dict__:
+            self._links = {}
+        self._links[(pin1, pin2)] = None
 
     @staticmethod
     def _check_connection(pin1, pin2) -> None:
@@ -186,6 +203,7 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
         """
         Eq = np.array([])
         self._check_connection(pin1, pin2)
+        self._record_link(pin1, pin2)
         
         for attr in pin1.__dict__.keys(): #for each flange of the other components 
             if any(k in attr for k in self._core):
@@ -206,7 +224,8 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
         '''
 
         self._check_connection(pin1, pin2)
-        
+        self._record_link(pin1, pin2)
+
         if store:
             self.connections.append(['.'.join(pin1.name.split('.')[:-1]), pin1.name.split('.')[-1], pin2.name.split('.')[-1], '.'.join(pin2.name.split('.')[:-1])])
         
@@ -283,33 +302,67 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
 
         return x
     
-    def MBcheck(self):
-        sources = self.get_Sources().values()
-        sinks = self.get_Sinks().values()
-        
-        m_in = 0
-        for i in sources:
-            m_in += i.F1.m
+    # ---- balances over the system boundary --------------------------------------------------------
+    def _all_links(self) -> list:
+        links = list(getattr(self, '_links', {}))
+        for _, sub in self._members(ModelBase):
+            if getattr(sub, '_is_system', False):
+                links += sub._all_links()
+        return links
 
-        m_out = 0
-        for i in sinks:
-            m_out += i.F0.m
+    def _process_units(self) -> list:
+        from .flow import SourceM, Sink
+        return [u for _, u in self._units() if not isinstance(u, (SourceM, Sink))]
 
-        return m_out - m_in
+    def boundary_flanges(self) -> dict:
+        """
+        Streams that cross the system boundary: ``{'feeds': [...], 'products': [...]}``.
 
-    def EBcheck(self):
-        sources = self.get_Sources().values()
-        sinks = self.get_Sinks().values()
-        
-        self.q_in = 0
-        for i in sources:
-            self.q_in += i.F1.n*i.F1.h
+        Every unit inlet that is not connected (directly, or through the ports of a sub-system) to the
+        outlet of another unit is a feed; every unit outlet that does not lead to the inlet of another unit
+        is a product. Sources and sinks only mark the boundary. Connections are the ones made by
+        ``connect_seq`` / ``connect`` and the tear streams of ``Recycle_Tear``, so call ``seq_sol`` first.
+        """
+        parent = {}
 
-        self.q_out = 0
-        for i in sinks:
-            self.q_out += i.F0.n*i.F0.h
+        def find(f):
+            parent.setdefault(f, f)
+            while parent[f] is not f:
+                parent[f] = parent[parent[f]]
+                f = parent[f]
+            return f
 
-        return (self.tot_heaters_in() + self.tot_heaters_out() + self.tot_heat_in() + self.tot_heat_out() +
-                self.tot_Qloss() + self.tot_work_in() + self.tot_work_out() + self.q_in - self.q_out
-              )
+        for a, b in self._all_links():
+            ra, rb = find(a), find(b)
+            if ra is not rb:
+                parent[ra] = rb
+        units = self._process_units()
+        group_in = {find(f) for u in units for f in u.inlets}
+        group_out = {find(f) for u in units for f in u.outlets}
+        feeds = [f for u in units for f in u.inlets if find(f) not in group_out]
+        products = [f for u in units for f in u.outlets if find(f) not in group_in]
+        return {'feeds': feeds, 'products': products}
+
+    def unit_balances(self) -> pd.DataFrame:
+        """Mass (g/s) and energy (kJ/s) balance residual of every unit, in - out; zero when it closes."""
+        from .flow import SourceM, Sink
+        rows = {path: {'mass': u.mass_balance(), 'energy': u.energy_balance(), 'Q+W': u.heat_and_work()}
+                for path, u in self._units() if not isinstance(u, (SourceM, Sink))}
+        return pd.DataFrame(rows).T
+
+    def MBcheck(self) -> float:
+        """Mass flow into the system minus mass flow out of it over the boundary streams, g/s."""
+        b = self.boundary_flanges()
+        return sum(f.m for f in b['feeds']) - sum(f.m for f in b['products'])
+
+    def EBcheck(self) -> float:
+        """
+        Energy balance over the system boundary, kJ/s: enthalpy of the feeds + heat and work added to all
+        units - enthalpy of the products. Zero when the balance closes; ``unit_balances()`` shows where not.
+        The enthalpy flows are kept in ``q_in`` and ``q_out``.
+        """
+        b = self.boundary_flanges()
+        self.q_in = sum(f.n*f.h for f in b['feeds'])
+        self.q_out = sum(f.n*f.h for f in b['products'])
+        return self.q_in - self.q_out + sum(u.heat_and_work() for u in self._process_units())
 

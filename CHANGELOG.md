@@ -38,7 +38,8 @@ version may notice.
 - `CSL.components.ChgMedium` (moved from the FT module, which now extends it)
 - `CSL.equilibrium` – equilibrium constants shared by reactors and the SOC, computed from the NASA Gibbs
   energies (`K_eq(T, reaction)`; `K_WGS`, `K_rWGS`, `K_MSR`, `K_PSR`, `K_NH3`, `K_MeOH_CO2`, `K_MeOH_CO`)
-- `ModelBase.inlets`, `outlets`, `mass_balance()` and a default `MBcheck()`
+- `ModelBase.inlets`, `outlets`, `mass_balance()` and a default `MBcheck()`; `energy_balance()`, `heat_and_work()`
+- `SysBase.boundary_flanges()`, `unit_balances()`
 - `IntrospectionMixin.get_Electric()` (was called by the reports but did not exist)
 - `Thermo.in_range`, `Thermo_CP.rho`, `Thermo_CP.LHVmix`
 - test suite (`tests/`), examples (`examples/`), documentation (`docs/`)
@@ -68,6 +69,10 @@ version may notice.
 - `connect` / `connect_seq` check the species list as well as the flange and medium type, and the error names
   the reason. Flanges compare by identity (`==` used to mean "same flange and medium type"), so they can be
   used in sets and as dictionary keys.
+- `SysBase.MBcheck()` / `EBcheck()` balance the streams that cross the system boundary (found from the recorded
+  connections), so they also work for boxes without sources and sinks and include every unit's heat and work.
+  `MBcheck()` now returns in − out like the unit models (was out − in). `connect_seq` always records the
+  connection; `store=True` is only needed for the flowsheet graph.
 - `SOC` accepts `T_soc0`, `T_soc1`, `P_soc` in addition to `Tsoc0`, `Tsoc1`.
 
 ### Fixed
@@ -109,6 +114,8 @@ version may notice.
 
 | What | Before | Now | Size of the effect |
 |---|---|---|---|
+| `SysBase.MBcheck()`, `EBcheck()` | sources and sinks only, `MBcheck` out − in; `EBcheck` from the heater / heat / work tables | boundary streams from the recorded connections, in − out; Σ(Q + W) of every unit | sign of `MBcheck`; `EBcheck` now closes for boxes without sources and sinks (e.g. `SOCsysRecupe`, `CO2Sys`) |
+| `Valve` outlet temperature | equal to the inlet | isenthalpic | none for ideal-gas media; Joule–Thomson cooling for `*_PR` media |
 | Species below a mole fraction of 1e-6 | left out of `cp`, `h`, `s` (a step at 1e-6) | included; entropy term goes smoothly to zero | ≤ 1e-6 × species value, e.g. 6e-6 kJ/mol in `h` |
 | Temperature outside the fitted range of a species | properties returned as **zero** | heat capacity frozen at the range limit, `h`, `s` continuous | large where it applies, e.g. `H2O(L)` above 600 K |
 | Liquid water as **first** species of a medium (`Water`, `Media_AEL`) | received the ideal-gas mixing/pressure entropy | no mixing or pressure entropy, as at any other position | `s`, `g`, `Sgen` at P ≠ 1 bar; exergy of liquid water at 60 bar: 11.05 → 0.90 kJ/mol |
