@@ -22,7 +22,7 @@ def test_condenser_box(syngas_x):
     assert box.exdest_df().loc['Separation', 'Ex. destruction / kW'] != 0
 
 
-@pytest.mark.parametrize('kind, efficiency, ratio', [('equilibrium', 0.900166, 5.5539), ('yield', 0.948935, 3.2808)])
+@pytest.mark.parametrize('kind, efficiency, ratio', [('equilibrium', 0.908687, 5.1638), ('yield', 0.948888, 3.2842)])
 def test_methanol_loop(kind, efficiency, ratio):
     loop = ProcessBoxes.MethanolLoop('loop', reactor=kind)
     passes, error = loop.run_sol()

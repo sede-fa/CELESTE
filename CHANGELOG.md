@@ -28,7 +28,8 @@ version may notice.
 - `Flange.Ex_ph`, `Flange.Ex_ch` (physical / chemical exergy), `Flange.EX` (exergy flow, kW);
   `ThermoExergy.Ex_ph`, `Ex_ch`, `condenses`
 - `CSL.components.ChgMedium` (moved from the FT module, which now extends it)
-- `CSL.equilibrium` – equilibrium constants shared by reactors and the SOC
+- `CSL.equilibrium` – equilibrium constants shared by reactors and the SOC, computed from the NASA Gibbs
+  energies (`K_eq(T, reaction)`; `K_WGS`, `K_rWGS`, `K_MSR`, `K_PSR`, `K_NH3`, `K_MeOH_CO2`, `K_MeOH_CO`)
 - `ModelBase.inlets`, `outlets`, `mass_balance()` and a default `MBcheck()`
 - `IntrospectionMixin.get_Electric()` (was called by the reports but did not exist)
 - `Thermo.in_range`, `Thermo_CP.rho`, `Thermo_CP.LHVmix`
@@ -101,6 +102,7 @@ version may notice.
 | FT streams with `phase='Liquid'` | gas properties | liquid: e.g. `Wax` at 298 K: `h` −653 → −766 kJ/mol, `cp` 0.67 → 1.05 kJ/mol/K; `Water`: −241.8 → −285.8 kJ/mol | every liquid FT stream; the `FT` reactor duty of the test case −32.628 → −32.643 kW |
 | Exergy of gaseous FT streams with C5+ | liquid chemical exergy with a gas dead state | gas carries the exergy of vaporisation, −R·T0·ln(Psat/P0) | `Wax` +53 kJ/mol (0.3 %), `Naphtha` +8 kJ/mol |
 | FT `RStoic.Q` | flow squared | enthalpy balance | any use of `RStoic.Q` or its `ExBs()` |
+| Equilibrium constants | empirical fits: linear Gibbs fit (MR, SOC, MeOH_WGS, Reformer with 32.115), Graaf (MeOH_Equil, MeOH_Yield) | from the NASA Gibbs energies, consistent with `h`, `s` | WGS at 450 K: 257 → 399 (fit), 378 → 399 (Graaf); within 0.6 % at SOC temperatures. Methanol loop carbon efficiency 0.9002 → 0.9087 |
 | Reactor and SOC results | – | same roots, solver tolerance tighter | relative 1e-6 or smaller |
 
 The reference values of the original implementation are stored in

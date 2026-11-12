@@ -16,9 +16,6 @@ changed, because the right answer depends on modelling intent or on data.
 - **`HB` and `HB_Adiabatic`** use the same rate expressions with different
   constants (`alpha`, `w`, `k_2`, `K_3`). They were left as two models; if one
   parameter set is the intended one, the rate functions can be shared.
-- **`Reformer.K_WGS`** uses 32.115 where `MR`, `SOC` and `MeOH_WGS` use 32.1153.
-  The shared `CSL.equilibrium.K_WGS` was not applied to the reformer to keep
-  its results unchanged.
 - **`Valve` and `Pump` defaults** (`F1_P=3.0` for a valve whose inlet default
   is 1 bar; composition defaults tied to `Fuel_CH4`) only make sense inside a
   system that overwrites them.

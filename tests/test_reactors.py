@@ -23,8 +23,8 @@ def test_methanation_equilibrium():
     r = reactors.MR('r', F0_Xi=np.array([0.6, 0.01, 0.2, 0.1, 0.08, 0.01]), T=600.0, P=10.0)
     sol = r.run_sol()
     assert sol.success and sol.residual_norm < 1e-7
-    np.testing.assert_allclose(r.F1.Xi, [0.0136, 0.2792, 0.1942, 0.0002, 0.4975, 0.0153], atol=5e-5)
-    assert r.Q == pytest.approx(-34.751232, rel=1e-6)
+    np.testing.assert_allclose(r.F1.Xi, [0.0151, 0.2786, 0.1944, 0.0002, 0.4964, 0.0153], atol=5e-5)
+    assert r.Q == pytest.approx(-34.707014, rel=1e-6)            # K from NASA Gibbs energies (was -34.751)
     assert_elements_conserved(r); assert_physical(r.F1)
     x = r.F1.Xi
     assert x[2]*x[0]/(x[3]*x[4]) == pytest.approx(equilibrium.K_WGS(600.0), rel=1e-5)
@@ -32,6 +32,18 @@ def test_methanation_equilibrium():
     assert r.Exloss > 0 and r.Sgen > 0 and 0 < r.Exeff < 1
     import scipy.optimize as spo
     assert r.run_sol(method=spo.least_squares).cost < 1e-10      # user supplied solver still accepted
+
+
+def test_equilibrium_constants_from_nasa_gibbs_energies():
+    """K = exp(-dG/RT) from the NASA data; matches the former fits where they were fitted."""
+    assert equilibrium.K_WGS(1073.15) == pytest.approx(equilibrium.K_WGS_fit(1073.15), rel=6e-3)     # SOC range
+    assert equilibrium.K_rWGS(500.0) == pytest.approx(equilibrium.K_rWGS_Graaf(500.0), rel=5e-2)     # methanol range
+    assert equilibrium.K_MeOH_CO2(500.0) == pytest.approx(equilibrium.K_MeOH_CO2_Graaf(500.0), rel=0.25)  # Graaf: 22 % lower
+    assert equilibrium.K_rWGS(700.0)*equilibrium.K_WGS(700.0) == pytest.approx(1.0)
+    # CO + 2 H2 -> CH3OH is CO2 + 3 H2 -> CH3OH + H2O plus the reverse shift
+    assert equilibrium.K_MeOH_CO(550.0) == pytest.approx(equilibrium.K_MeOH_CO2(550.0)*equilibrium.K_WGS(550.0), rel=1e-10)
+    import jax, jax.numpy as jnp
+    assert float(jax.jit(lambda t: equilibrium.K_WGS(t, jnp.exp))(800.0)) == pytest.approx(equilibrium.K_WGS(800.0), rel=1e-5)
 
 
 def test_haber_bosch():
@@ -50,8 +62,8 @@ def test_haber_bosch():
 
 
 @pytest.mark.parametrize('cls, x_ref', [
-    (reactors.MeOH_Equil, [0.6404, 0.0655, 0.0986, 0.0087, 0.0323, 0.0, 0.1546]),
-    (reactors.MeOH_Yield, [0.7014, 0.0581, 0.1084, 0.0428, 0.0079, 0.0, 0.0814]),
+    (reactors.MeOH_Equil, [0.6342, 0.0660, 0.0965, 0.0073, 0.0356, 0.0, 0.1604]),
+    (reactors.MeOH_Yield, [0.7017, 0.0581, 0.1087, 0.0425, 0.0076, 0.0, 0.0814]),
 ])
 def test_methanol_isothermal_reactors(cls, x_ref):
     r = cls('r', F0_n=100, F0_Xi=MEOH_FEED)
@@ -80,8 +92,8 @@ def test_methanol_kinetic_reactor_returns_a_physical_state():
 def test_methanol_adiabatic_reactor():
     r = reactors.MeOH_WGS('r', F0_n=100, F0_Xi=MEOH_FEED)
     assert r.run_sol().success
-    np.testing.assert_allclose(r.F1.Xi, [0.666, 0.0581, 0.0729, 0.0782, 0.0433, 0.0, 0.0814], atol=5e-5)
-    assert r.F1.T == pytest.approx(649.082, abs=5e-3) and r.Q == pytest.approx(0.0, abs=1e-5)
+    np.testing.assert_allclose(r.F1.Xi, [0.6674, 0.0581, 0.0744, 0.0768, 0.0419, 0.0, 0.0814], atol=5e-5)
+    assert r.F1.T == pytest.approx(650.648, abs=5e-3) and r.Q == pytest.approx(0.0, abs=1e-5)
     assert_elements_conserved(r)
     assert set(r.conversion) == {'H2 Conversion', 'CO2 Conversion', 'Carbon Conversion'}
 

@@ -477,10 +477,10 @@ class MeOH_Equil(EquilBase):
         return self.Eq
     
     def K_rWGS(self):
-        return eq.K_rWGS_Graaf(self.F1.T)
+        return eq.K_rWGS(self.F1.T)
 
     def K_MeOH(self):
-        return eq.K_MeOH_CO2_Graaf(self.F1.T) # for CO2
+        return eq.K_MeOH_CO2(self.F1.T) # for CO2
 
     def MBcheck(self)->float:
         """Print the relative mass balance error and return out - in, g/s."""
@@ -583,7 +583,7 @@ class MeOH_Yield(EquilBase):
         return self.Eq
     
     def K_rWGS(self):
-        return eq.K_rWGS_Graaf(self.T)
+        return eq.K_rWGS(self.F1.T)
 
     MBcheck = MeOH_Equil.MBcheck
 
@@ -892,13 +892,13 @@ class Reformer(ModelBase):
         return self.F0.n*self.F0.mw/(self.F1.n*self.F1.mw) 
     
     def K_PSR(self):
-        return np.exp(- (528.68  -0.744*self.F1.T )/(8.314e-3*self.F1.T) ) 
+        return eq.K_PSR(self.F1.T)
     
     def K_MSR(self):
-        return np.exp(- (225_215.699 -252.643*self.F1.T )/(8.314*self.F1.T))
+        return eq.K_MSR(self.F1.T)
     
     def K_WGS(self):
-        return np.exp(- (32.115*(self.F1.T) - 3.521_1E4)/(8.314*self.F1.T))
+        return eq.K_WGS(self.F1.T)
     
     def Q_WGS(self):
         return self.F1.Xi[2]*self.F1.Xi[0]/self.F1.Xi[3]/self.F1.Xi[4]
