@@ -87,7 +87,8 @@ def test_exergy_destruction_equals_T0_times_entropy_generation():
     m.F0.T, m.F1.T = 400.0, 700.0
     m.run_sol()
     assert m.Exloss == pytest.approx(exergy.T0*m.Sgen, rel=1e-6)
-    v = components.Valve('v', media.Air(), Xi=np.array([0.21, 0.79]), F0_T=400.0, F0_P=10.0, F1_P=2.0)
+    v = components.Valve('v', media.Air(), P_out=2.0)
+    v.F0.set(Xi=np.array([0.21, 0.79]), T=400.0, P=10.0)
     v.run_sol()
     assert v.Exloss == pytest.approx(exergy.T0*v.Sgen, rel=1e-9)
 

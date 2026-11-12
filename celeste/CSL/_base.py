@@ -107,8 +107,8 @@ class ModelBase(Base):
             flange.set(**{var: value})
         if used:
             from .._deprecation import warn_deprecated
-            example = ', '.join(f"{k.partition('_')[2]}=..." for k in used[:2])
             port = used[0].partition('_')[0]
+            example = ', '.join(f"{k.partition('_')[2]}=..." for k in used if k.partition('_')[0] == port)
             warn_deprecated(f"{type(self).__name__}({', '.join(used)}=...): state keywords are deprecated; set the "
                             f"operating state on the flanges, e.g. unit.{port}.set({example})",
                             stacklevel=self._caller_level())

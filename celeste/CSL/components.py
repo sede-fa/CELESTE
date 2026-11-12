@@ -627,63 +627,58 @@ class ASU(ModelBase):
     def run_sol(self):
         return self.Eqs()
 
-class Pump(ModelBase): 
+class Pump(ModelBase):
     '''
-    Isentropic pump (adiabatic). Used for water or methanol+water mixture
-    One stream is entering and one stream is coming out. 
-    The outlet n, Xi, h, cp, g, s, T are determined.
-    The real work of the Pump object is calculated for a given efficiency.
-    Important: when working with Fuel_CH4L pure water must be added
-    when working with Fuel
+    Adiabatic liquid pump (or hydraulic turbine when the pressure falls).
+
+    Work for an incompressible liquid, W = V̇·ΔP/eff (pump) or V̇·ΔP·eff (turbine),
+    with the density of the inlet medium; the outlet temperature follows from the
+    energy balance h1 = h0 + W/n.
 
     Parameters:
-        name: objects name
-        Medium: media of the streams
-        n: inlet and outlet mol flow in [mol/s]. Defaults to 1.0
-        Xi: inlet and outlet  mol fraction of every component in Medium. Defaults to np.array([0.,0.,0.,0.,1.,0.])
-        F0_T: inlet temperature in [K]. Defaults to 298.15 
-        F1_T: outlet temperature in [K]. Defaults to 368.15
-        F0_P: inlet pressure in [bar]. Defaults to 1.0
-        F1_P: outlet pressure in [bar]. Defaults to 3.0 
-    
-    Attributes: 
-        R: ideal gas constant in [kJ/mol K]
-        W: real pump work in [kJ/s]
-        Eq: equation to be solved
-        Exloss: exergy loss in the object [kJ/s]
-        Exeff: exergy efficiency of the object. It goes between 0 and 1 
+        name:   objects name
+        Medium: medium of the stream. Defaults to media.Fuel_CH4L() (pure water feed)
+        eff:    efficiency, 0 < eff <= 1. Defaults to 1
+        P_out:  outlet pressure [bar]
+        dP:     pressure rise [bar] (P1 = P0 + dP)
 
-    Methods: 
-        Eqs: the outlet mol flow and composition are determined. Returns: "Eq" attribute
-        rho_water: determines the density of water. Returns: the density in [Kg/m3]
-        rho_MeOH : determines density of Methanol. Returns: density in [Kg/m3]
-        rho_avr : determines average density of the mixture. Returns: density in [Kg/m3]
-        f_sol: contains the variable to be optimized by the solver. Return: the "Eqs" method
-        run_sol: contains the optimizer function and guesses values. Returns: the solution of the optimization
+    With neither ``P_out`` nor ``dP`` the pressure set on ``F1`` is the specification.
 
-    Notes:  
-        The Pump object can work for other chemicals if the density of them are loaded (methanol in this case)
+    Ports: F0 -> F1
+    Properties: W (kJ/s, added), Q (= 0 after run_sol), Exloss, Exeff, Sgen
 
-    Examples:
-        1) 
-        Pump = Components.Pump('pump_example', Medium=media.Fuel_CH4L(), F0_n=100, 
-        F0_Xi=np.array([1e-8,1e-8,1e-8,1e-8,1.0,1e-8]), F0_T=298.15, F0_P=1.0, F1_P=2.0)
+    Example:
+        pump = components.Pump('pump', media.Fuel_CH4L(), eff=0.75, P_out=30.0)
+        pump.F0.set(n=100.0, T=298.15, P=1.0)
+        pump.run_sol()
     '''
      
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4L(), n:float=1.0, 
-                 Xi=np.array([0.,0.,0.,0.,1.,0.]), F0_T:float=298.15, F0_P:float=1.0, 
-                 F1_T:float=368.15, F1_P:float=3.0, eff:float=1
-                ):
+    _default_state = {'F0': dict(n=1.0, Xi=[0., 0., 0., 0., 1., 0.], T=298.15, P=1.0),
+                      'F1': dict(n=1.0, T=298.15, P=3.0)}
+
+    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4L(), eff:float=1.0,
+                 P_out:float|None=None, dP:float|None=None, **legacy):
+        if P_out is not None and dP is not None:
+            raise ValueError(f"{name}: give either the outlet pressure P_out or the pressure rise dP, not both")
         super().__init__(locals())
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=n, Xi=Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=n, Xi=Xi, T=F1_T, P=F1_P)
-        self.eff = eff
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        n, Xi = legacy.pop('n', None), legacy.pop('Xi', None)   # former keywords for the feed
+        self._init_state(self._spread(legacy, ['F0'], n=n, Xi=Xi))
         self.R = 8.314462618e-3
-        
+
+    def _set_outlet_pressure(self):
+        """Outlet pressure from ``P_out`` or ``dP`` (rise); with neither, the pressure set on ``F1`` is the spec."""
+        if self.P_out is not None:
+            self.F1.P = self.P_out
+        elif self.dP is not None:
+            self.F1.P = self.F0.P + self.dP
+
     def Eqs(self):
-        self.F1.n = self.F0.n 
+        self._set_outlet_pressure()
+        self.F1.n = self.F0.n
         self.F1.Xi = self.F0.Xi
-        self.Eq =  np.array([self.Q])
+        self.Eq = np.array([self.Q])
         return self.Eq
 
     @property
@@ -720,21 +715,55 @@ class Pump(ModelBase):
             
 class Valve(ModelBase):
     """
-    Isothermal valve model with no heat or work production
+    Throttle valve: adiabatic, no work, so the outlet has the inlet enthalpy (isenthalpic).
+
+    The outlet temperature follows from h(T1, P1) = h(T0, P0). For ideal-gas media
+    the enthalpy does not depend on pressure and T1 = T0; real-fluid media
+    (``*_PR``) show the Joule–Thomson effect.
+
+    Parameters:
+        name:   objects name
+        Medium: medium of the stream. Defaults to media.Fuel_CH4()
+        P_out:  outlet pressure [bar]
+        dP:     pressure drop [bar] (P1 = P0 - dP)
+
+    With neither ``P_out`` nor ``dP`` the pressure set on ``F1`` is the specification.
+
+    Ports: F0 -> F1
+    Properties: Exloss, Exeff, Sgen (W = Q = 0)
     """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4(), n:float=1.0, 
-                 Xi:npArray[np.float64]|None=np.array([0.,0.,0.,0.,1.,0.]), F0_T:float=298.15, F0_P:float=1.0, 
-                 F1_T:float=368.15, F1_P:float=3.0,
-                ):
+    _default_state = {'F0': dict(n=1.0, T=298.15, P=3.0), 'F1': dict(n=1.0, T=298.15, P=1.0)}
+    W = 0.0
+    Q = 0.0
+
+    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4(), P_out:float|None=None,
+                 dP:float|None=None, **legacy):
+        if P_out is not None and dP is not None:
+            raise ValueError(f"{name}: give either the outlet pressure P_out or the pressure drop dP, not both")
         super().__init__(locals())
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=n, Xi=Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=n, Xi=Xi, T=F1_T, P=F1_P)
-        
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        n, Xi = legacy.pop('n', None), legacy.pop('Xi', None)   # former keywords for the feed
+        self._init_state(self._spread(legacy, ['F0'], n=n, Xi=Xi))
+
     def Eqs(self):
-        self.F1.n = self.F0.n 
+        if self.P_out is not None:
+            self.F1.P = self.P_out
+        elif self.dP is not None:
+            self.F1.P = self.F0.P - self.dP
+        self.F1.n = self.F0.n
         self.F1.Xi = self.F0.Xi
-        self.F1.T = self.F0.T
-        self.W = 0
+
+    def _dh(self, T):
+        self.F1.T = T
+        return self.F1.h - self.F0.h
+
+    def run_sol(self):
+        self.Eqs()
+        h0, T0 = self.F0.h, self.F0.T
+        if abs(self._dh(T0)) <= 1e-9*max(1.0, abs(h0)):
+            return solvers.trivial_solution([T0])      # ideal gas (or no pressure change): T1 = T0
+        return solvers.solve_scalar(self._dh, max(1.0, T0 - 150.0), T0 + 150.0, x0=T0, name=self.name)
 
     @property
     def Exloss(self):
@@ -746,10 +775,9 @@ class Valve(ModelBase):
 
     @property
     def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n 
-    
-    def run_sol(self):
-        return self.Eqs()
+        return self.F1.s*self.F1.n - self.F0.s*self.F0.n
+
+
 class DAC(ModelBase):
     """
     A Direct air capture unit that seperates CO2 from air. Assuming 100% capture rate.

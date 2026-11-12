@@ -103,9 +103,53 @@ def test_pump():
 
 
 def test_valve():
-    v = components.Valve('v', F0_P=10.0, F1_P=2.0, Xi=np.array([0.3, 0.1, 0.1, 0.1, 0.3, 0.1]), F0_T=500.0)
+    v = components.Valve('v', P_out=2.0)
+    v.F0.set(Xi=np.array([0.3, 0.1, 0.1, 0.1, 0.3, 0.1]), T=500.0, P=10.0)
     v.run_sol()
-    assert v.F1.T == 500.0 and v.Exloss > 0 and v.Sgen > 0
+    assert v.F1.P == 2.0 and v.F1.T == 500.0 and v.Exloss > 0 and v.Sgen > 0
+    assert v.W == 0 and v.Q == 0
+
+
+@pytest.mark.parametrize("spec", [dict(P_out=2.0), dict(dP=8.0), dict()])
+def test_valve_pressure_specification(spec):
+    v = components.Valve('v', media.Air(), **spec)
+    v.F0.set(Xi=AIR, T=400.0, P=10.0)
+    if not spec:
+        v.F1.set(P=2.0)                                 # spec on the flange
+    v.run_sol()
+    assert v.F1.P == pytest.approx(2.0) and v.F1.h == pytest.approx(v.F0.h, abs=1e-12)
+
+
+def test_valve_is_isenthalpic_for_real_fluids():
+    """Throttling a real gas cools it (Joule–Thomson); enthalpy is conserved."""
+    v = components.Valve('v', media.Fuel_CH4_PR(), P_out=5.0)
+    v.F0.set(n=1.0, Xi=np.array([0.1, 0.8, 0.05, 0.03, 0.01, 0.01]), T=300.0, P=80.0)
+    sol = v.run_sol()
+    assert sol.success
+    assert v.F1.h == pytest.approx(v.F0.h, abs=1e-8)
+    assert 260.0 < v.F1.T < 280.0                       # methane: about 0.4 K/bar (JT coefficient)
+
+
+def test_valve_and_pump_reject_two_pressure_specs():
+    with pytest.raises(ValueError):
+        components.Valve('v', P_out=1.0, dP=1.0)
+    with pytest.raises(ValueError):
+        components.Pump('p', P_out=1.0, dP=1.0)
+
+
+@pytest.mark.parametrize("spec", [dict(P_out=3.0), dict(dP=2.0)])
+def test_pump_pressure_specification(spec):
+    p = components.Pump('p', eff=0.8, **spec)
+    p.run_sol()
+    assert p.F1.P == pytest.approx(3.0) and p.W > 0 and p.F1.T > p.F0.T
+    assert p.F1.n*p.F1.h - p.F0.n*p.F0.h == pytest.approx(p.W, rel=1e-6)
+
+
+def test_pump_as_turbine_recovers_work():
+    p = components.Pump('t', eff=0.8, P_out=1.0)
+    p.F0.set(P=30.0)
+    p.run_sol()
+    assert p.W < 0
 
 
 def test_black_box_separators(syngas_x):
