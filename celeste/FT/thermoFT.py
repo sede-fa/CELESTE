@@ -17,30 +17,96 @@ except ImportError:
 2. ThermoExergyFT: stream exergy for FT media (extends celeste.CSL.exergy.ThermoExergy)
 '''
 
-def _VapCalc(T, Tmin, Tmax, B, Tc, n, cpl):
+_P_ATM = 1.01325                                            # bar, pressure at the normal boiling point
+_GL_X, _GL_W = np.polynomial.legendre.leggauss(16)          # quadrature for the Clausius-Clapeyron integral
+
+
+def _ig_props(T, CNumber, m, c):
+    '''[cp, h, s] of the hydrocarbons in the ideal-gas state; T broadcasts against CNumber.'''
+    CNumber = np.asarray(CNumber, dtype=float)
+    T = np.broadcast_to(np.asarray(T, dtype=float), np.broadcast_shapes(np.shape(T), CNumber.shape))
+    arr = np.stack((T**4, T**3, T**2, T, np.ones_like(T)))
+    return np.tensordot(m, arr, axes=(1, 0))*CNumber + np.tensordot(c, arr, axes=(1, 0))
+
+
+def _gauss(a, b):
+    '''Nodes (N, K) and weights (N, K) of the Gauss-Legendre rule on [a_i, b_i].'''
+    half = 0.5*(b - a)[:, None]
+    return half*_GL_X + 0.5*(a + b)[:, None], half*_GL_W
+
+
+def _VapCalc(T, d, m, c, R=8.314462618e-3, P0=1.0):
     '''
-    Enthalpy and entropy of vaporisation of the hydrocarbons, shape (2, N).
+    Vaporisation properties of the hydrocarbons at T, shape (3, N):
+    ``[hvap, svap, d(hvap)/dT]`` with
 
-    T > Tmax          : 0
-    Tmin <= T <= Tmax : B*(1 - T/Tc)*n
-    T < Tmin          : B*(1 - Tmin/Tc)**n + cpl*(T - Tmin)
+        h_liquid(T)  = h_ig(T) - hvap
+        s_liquid(T)  = s_ig(T, P0) - svap
+        cp_liquid(T) = cp_ig(T) - d(hvap)/dT
 
-    NOTE: the in-range branch multiplies by ``n`` whereas the documented Watson
-    correlation (see ``Thermo.calVAP``) and the branch below ``Tmin`` raise to
-    the power ``n``. The original behaviour is kept unchanged here; see
-    docs/known_issues.md before relying on liquid-phase hydrocarbon enthalpies.
+    hvap (kJ/mol), Watson correlation (Yaws, 2014):
+        Tmin <= T < Tc :  B (1 - T/Tc)^n
+        T < Tmin       :  hvap(Tmin) + [h_ig(T) - h_ig(Tmin)] - cpl (T - Tmin)
+                          (Kirchhoff: sub-cooled liquid with the constant liquid heat
+                          capacity ``cpl``; without ``cpl`` the Watson form is extrapolated)
+        T >= Tc        :  0 (no liquid above the critical temperature)
+
+    svap (kJ/mol/K), entropy of the liquid relative to the ideal gas at P0:
+        svap = hvap/T + R ln(Psat(T)/P0)
+    with the vapour pressure from the Clausius-Clapeyron equation, integrated over
+    the same hvap from the normal boiling point Tb (Psat(Tb) = 1.01325 bar):
+        ln(Psat(T)/1.01325 bar) = integral_Tb^T hvap(t)/(R t^2) dt
+
+    The liquid is thermodynamically consistent with the gas: dh_liquid = T ds_liquid,
+    and g_liquid = g_gas at Psat. Liquid volume and the pressure dependence of the
+    liquid properties are neglected.
+
+    ``d`` holds the arrays B, n, Tc, Tmin, Tb, cpl, C_N of the hydrocarbons.
     '''
-    with np.errstate(invalid='ignore'):
-        below = B*(1 - Tmin/Tc)**n + cpl*(T - Tmin)
-    hvap = np.where(T > Tmax, 0.0, np.where(T >= Tmin, B*(1 - T/Tc)*n, below))
-    return np.stack((hvap, hvap/T))
+    T = float(T)
+    B, n, Tc, Tmin, Tb, cpl, CN = d['B'], d['n'], d['Tc'], d['Tmin'], d['Tb'], d['cpl'], d['C_N']
+    if B.size == 0:
+        return np.zeros((3, 0))
 
-def _phaseVap(phaseID, T, Tmin, Tmax, B, Tc, n, cpl, NHC):
+    def watson(t):
+        return B[..., None]*np.clip(1 - t/Tc[..., None], 0.0, None)**n[..., None] if np.ndim(t) == 2 \
+            else B*np.clip(1 - t/Tc, 0.0, None)**n
+
+    liquid = np.isfinite(B) & (T < Tc)
+    kirchhoff = liquid & (T < Tmin) & np.isfinite(cpl)
+    Tw = np.where(kirchhoff, Tmin, T)                       # end of the Watson range
+
+    # Watson part: hvap and the Clausius-Clapeyron integral from Tb to Tw
+    hvap = watson(Tw)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        dhvap = -n*hvap/(Tc*(1 - Tw/Tc))
+    t, w = _gauss(Tb, Tw)
+    lnP = np.log(_P_ATM) + np.sum(w*watson(t)/(R*t*t), axis=1)
+
+    # Kirchhoff part below Tmin (sub-cooled liquid)
+    if kirchhoff.any():
+        h_min = _ig_props(Tmin, CN, m, c)[1]
+        h_T = _ig_props(T, CN, m, c)[1]
+        hvap_k = hvap + (h_T - h_min) - cpl*(T - Tmin)
+        t, w = _gauss(Tmin, np.full_like(Tmin, T))
+        h_t = _ig_props(t, CN[:, None], m, c)[1]
+        integrand = (watson(Tmin)[:, None] + (h_t - h_min[:, None]) - cpl[:, None]*(t - Tmin[:, None]))/(R*t*t)
+        lnP_k = lnP + np.sum(w*integrand, axis=1)
+        hvap = np.where(kirchhoff, hvap_k, hvap)
+        dhvap = np.where(kirchhoff, _ig_props(T, CN, m, c)[0] - cpl, dhvap)
+        lnP = np.where(kirchhoff, lnP_k, lnP)
+
+    hvap = np.where(liquid, hvap, 0.0)
+    svap = np.where(liquid, hvap/T + R*(lnP - np.log(P0)), 0.0)
+    dhvap = np.where(liquid, dhvap, 0.0)
+    return np.stack((hvap, svap, dhvap))
+
+
+def _phaseVap(phaseID, T, d, m, c, NHC):
     if phaseID == 1:
-        VAP = _VapCalc(T, Tmin, Tmax, B, Tc, n, cpl)
-    else:
-        VAP = np.zeros((2, NHC))
-    return VAP
+        return _VapCalc(T, d, m, c)
+    return np.zeros((3, NHC))
+
 
 def _mtCalcStatic(m, c, thermArr, CNumberi):
     '''[cp, h, s] of the hydrocarbons as linear functions of the carbon number, shape (3, N)'''
@@ -135,6 +201,8 @@ class Thermo:
         self.__HVAP_Tmax = data['HVAP_Tmax']
         self.__cpl = data['cpl']
         self.CNumberi = data['C_N']
+        self._vap_data = dict(B=data['HVAP_B'], n=data['HVAP_n'], Tc=data['Tc'], Tmin=data['HVAP_Tmin'],
+                              Tb=data['T_boil'], cpl=data['cpl'], C_N=data['C_N'])
 
         self.__m = self._m
         self.__c = self._c
@@ -172,28 +240,28 @@ class Thermo:
     
     def calVAP(self): # only for HC
         '''
-        Method that returns the enthalpy of vaporization of hydrocarbons.
-        - The n oefficient and Tc were taken from "Yaws, Carl. Thermophysical Properties of Chemicals and Hydrocarbons. 2nd Ed., 2014".
-        - The HVAP_B coefficient is calculated with the HVAP and the boiling T as: HVAP_B = Hvap_boil/(1 - Tboil/Tc)**n. Hvap_boil was 
-        obtained from the same reference.
-        - The sensible heat when T < Tmin is accounted. Cp°liquid(cpl) was taken from 
+        Enthalpy [kJ/mol] and entropy [kJ/mol/K] of vaporisation of the hydrocarbons at the
+        stream temperature and d(hvap)/dT, shape (3, N); see ``_VapCalc``.
+        - Watson correlation hvap = B*(1 - T/Tc)**n; n and Tc from "Yaws, Carl. Thermophysical
+          Properties of Chemicals and Hydrocarbons. 2nd Ed., 2014". B = Hvap_boil/(1 - Tboil/Tc)**n
+          with Hvap_boil from the same reference.
+        - Below Tmin the liquid is sub-cooled with the liquid heat capacity cpl (Kirchhoff).
+        - The entropy includes the vapour pressure (Clausius-Clapeyron from the normal boiling point).
         '''
-
-        vap = _VapCalc(self._T, self.__HVAP_Tmin, self.__HVAP_Tmax, self.__HVAP_B, self.__HVAP_Tc, self.__HVAP_n, self.__cpl)
-        return vap 
+        return _VapCalc(self._T, self._vap_data, self.__m, self.__c, self.R)
 
     def thermoArr(self): 
         self._thermArr = _thermoArrStat(self._T)
 
     def calcThermoHC(self): 
 
-        VAP = _phaseVap(self._phaseID, self._T, self.__HVAP_Tmin, self.__HVAP_Tmax, self.__HVAP_B, self.__HVAP_Tc, self.__HVAP_n, self.__cpl, self.__NHC)
+        VAP = _phaseVap(self._phaseID, self._T, self._vap_data, self.__m, self.__c, self.__NHC)
         self.__HVAP = VAP[0]
         self.__SVAP = VAP[1]
 
         self.__therm_sep = _mtCalcStatic(self.__m, self.__c, self._thermArr, self.CNumberi) 
         
-        self.__HC_cp = self.__therm_sep[0]
+        self.__HC_cp = self.__therm_sep[0] - VAP[2]
         self.__HC_h = self.__therm_sep[1] - self.__HVAP 
         self.__HC_s = self.__therm_sep[2] - self.__SVAP
         self.__HC_g = self.__HC_h - self._T*self.__HC_s   
