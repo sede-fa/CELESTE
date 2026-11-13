@@ -6,6 +6,7 @@ from . import interfaces, ModelBase, media
 from .. import solvers
 import numpy as np
 from numpy.typing import NDArray as npArray
+from typing import Callable, override, Literal 
 
 class HexBase(ModelBase):
     """      
@@ -44,13 +45,13 @@ class HexBase(ModelBase):
                  MediumH1:media.Medium_Base, MediumC1:media.Medium_Base):
         super().__init__(locals())
 
-        self.H0 = interfaces.Flange(name + '.H0', Medium=MediumH0) #H=Hot
-        self.H1 = interfaces.Flange(name + '.H1', Medium=MediumH1) #C=Cold
-        self.C0 = interfaces.Flange(name + '.C0', Medium=MediumC0)
-        self.C1 = interfaces.Flange(name + '.C1', Medium=MediumC1)
+        self.H0: interfaces.Flange = interfaces.Flange(name + '.H0', Medium=MediumH0) #H=Hot
+        self.H1: interfaces.Flange = interfaces.Flange(name + '.H1', Medium=MediumH1) #C=Cold
+        self.C0: interfaces.Flange = interfaces.Flange(name + '.C0', Medium=MediumC0)
+        self.C1: interfaces.Flange = interfaces.Flange(name + '.C1', Medium=MediumC1)
 
-        self.__H0 = interfaces.Flange(name + '.__H0', Medium=MediumH1)
-        self.__C0 = interfaces.Flange(name + '.__C0', Medium=MediumC1)
+        self.__H0: interfaces.Flange = interfaces.Flange(name + '.__H0', Medium=MediumH1)
+        self.__C0: interfaces.Flange = interfaces.Flange(name + '.__C0', Medium=MediumC1)
 
     def Eqs(self):
         self.H1.n = self.H0.n
@@ -65,7 +66,7 @@ class HexBase(ModelBase):
         self.__H0.Medium.PTX = self.H0.P, self.C0.T, self.H0.Xi
         self.__C0.Medium.PTX = self.C0.P, self.H0.T, self.C0.Xi
 
-        self.Eq = np.array([
+        self.Eq: npArray[np.float64] = np.array([
             self.H0.h - self.H1.h - self.Q/self.H0.n,
             self.C0.h - self.C1.h + self.Q/self.C0.n,
         ])
@@ -123,7 +124,7 @@ class HexBase(ModelBase):
     def Sgen(self):
         return self.H0.n*(self.H1.s - self.H0.s) + self.C0.n*(self.C1.s - self.C0.s)
     
-    def f_sol(self, x):
+    def f_sol(self, x:npArray[np.float64]) -> npArray[np.float64]:
         self.H1.T = x[0]
         self.C1.T = x[1]
         return self.Eqs()  
@@ -154,11 +155,14 @@ class HexNTU(HexBase):
         hx.run_sol()          # sets hx.H1.T and hx.C1.T
     """
 
-    def __init__(self, name:str, MediumH:media.Medium_Base, MediumC:media.Medium_Base, UA=0.99, HexType='counter-flow'):
+    def __init__(self, name:str, MediumH:media.Medium_Base, MediumC:media.Medium_Base, UA:float=0.99, HexType:str='counter-flow'):
         
         super().__init__(name, MediumH0=MediumH, MediumC0=MediumC, MediumC1=MediumC, MediumH1=MediumH)
+        # Inputs are stored as instance attributes for future use.
+        self.name: str = name
+        self.UA: float = UA
+        self.HexType: str = HexType
         
-        self.UA = UA
         if HexType=='counter-flow':
             self.eta = self.etaCounter
         elif HexType=='co-flow':
@@ -166,25 +170,92 @@ class HexNTU(HexBase):
         else:
             self.eta = self.etaDummy
 
+        # Declarations for the run_sol_fixOutletTemp() method.
+        self._C1targ: interfaces.Flange
+        self._H1targ: interfaces.Flange
+        self.message: str # Variable for storing any non-critical warnings
+        self.eps_targ: float
+
     @property
     def NTU(self):
         return self.UA*1e-3/self.Cmin
     
     @property
+    @override
     def epsilon(self):
         return self.eta(self.Cr, self.NTU)
         
-    def etaCounter(self, Cr, NTU):
+    def etaCounter(self, Cr:float, NTU:float) -> float:
         if Cr == 1.0:
             return NTU/(1+NTU)
         else:
             return (1 - np.exp(-NTU*(1-Cr)))/(1-Cr*np.exp(-NTU*(1-Cr)))
     
-    def etaCo(self,Cr, NTU):
+    def etaCo(self,Cr:float, NTU:float) -> float:
         return (1 - np.exp(-NTU*(1+Cr)))/(1+Cr)
 
-    def etaDummy(self, Cr, NTU):
+    def etaDummy(self, Cr:float, NTU:float) -> float:
         return self.UA
+
+    def run_sol_fixOutletTemp(self, Ttarg:float, stream: Literal['hot','cold'], eps_max:float=0.999):
+        """
+        Runs the HEX to get a desired outlet temperature (or as close to it as possible). Manipulates the UA parameter.
+        """
+
+        # Initialise the __H0 and __C0 outlet flanges for calculating Qmax, etc.
+        _ = self.Eqs()
+
+        # Check inputs
+        if not (0 <= eps_max <= 0.999):
+            raise ValueError(f'In {self.name}.fixOutletTemp(): invalid eps_max provided. Must be between 0 and 0.999')
+        if stream not in ('cold','hot'):
+            raise ValueError(f'In {self.name}.fixOutletTemp(): invalid stream provided. Must be "hot" or "cold"')
+
+        # Calculate maximum effectiveness for co-flow (cannot approach 1).
+        if self.HexType == 'co-flow':
+            eps_max_co = 1 / (1+self.Cr)
+            eps_max = min(eps_max, eps_max_co*eps_max) # eps_max_co cannot be reached either. So a value approaching that must be used. Here, eps_max itself is chosen as an arbitrary approach factor.
+
+        ## Calculate the demanded (or max. possible) effectiveness    
+        if stream == 'cold':
+            if Ttarg <= self.C0.T:
+                eps_targ = np.nan
+                self.message = 'TCtarg =< TCin. No heat transferred.' # Can replace this variable with a warning output if desired.
+            else:
+                self._C1targ = interfaces.Flange(name=self.name+'.cold_targ_flange', Medium=self.C0.Medium, Xi=self.C0.Xi, n=self.C0.n, P=self.C0.P, T=Ttarg)
+                eps_targ = self.C0.n*(self._C1targ.h-self.C0.h) / self.Qmax
+        elif stream == 'hot':
+            if Ttarg >= self.H0.T:
+                eps_targ = np.nan
+                self.message = 'THtarg >= THin. No heat transferred.' # Can replace this variable with a warning output if desired.
+            else:
+                self._H1targ = interfaces.Flange(name=self.name+'.hot_targ_flange', Medium=self.H0.Medium, Xi=self.H0.Xi, n=self.H0.n, P=self.H0.P, T=Ttarg)
+                eps_targ = self.H0.n*(self.H0.h-self._H1targ.h) / self.Qmax
+
+        if eps_targ > 0: # If heat transfer can take place
+            eps_final = min(eps_targ, eps_max)
+            self.message = f'Desired effectiveness = {eps_targ}, Max effectiveness = {eps_max} ---> Applied effectiveness = {eps_final}' # Can replace this variable with a warning output if desired.
+        elif eps_targ <=0: # Why would this happen?????
+            raise ValueError(f'In {self.name}: desired effectiveness is non-positive ({eps_targ}) despite corrections. Check for phase changes or extreme temperatures. Ttarg for {stream} outlet = {Ttarg}K.')
+        else: # If heat transfer cannot take place (TCtarg <= TCin, or THtarg >= THin)
+            eps_final = 0.
+
+        self.eps_targ = eps_targ
+
+        ## Calculate the appropriate self.UA for the calculated effectiveness
+        if self.HexType == 'co-flow':
+            self.UA = -self.Cmin * 1e3 * np.log(1 - eps_final*(1+self.Cr)) / (1+self.Cr)
+        elif self.HexType == 'counter-flow':
+            if self.Cr == 1.0:
+                self.UA = self.Cmin*1e3*eps_final/(1-eps_final)
+            else:
+                self.UA = -self.Cmin * 1e3 * np.log((1-eps_final)/(1-eps_final*self.Cr)) / (1-self.Cr)
+        else:    
+            self.UA = eps_final
+
+        return self.run_sol()
+        
+
 
 class Heater(ModelBase):
     """

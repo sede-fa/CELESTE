@@ -160,7 +160,7 @@ class IntrospectionMixin:
                   'Reactor': 0, 'Separation': 0, 'Split_Mix': 0, 'Valves': 0}
         tot = self.tot_Exloss()
         for i, v in self.get_Exloss().items():
-            if isinstance(v, (CSL.components.Pump, CSL.components.Compressor)):
+            if isinstance(v, (CSL.components.Pump, CSL.turbomachinery.Compressor)):
                 groups['Compressors'] += v.Exloss
             if isinstance(v, CSL.electrochem.SOC):
                 groups['SOC'] += v.Exloss

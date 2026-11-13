@@ -10,13 +10,14 @@ CELESTE Standard Library
     reactors     equilibrium, yield and kinetic reactors
     separation   vapour-liquid flash drum
     thermo       property objects behind the media
+    turbomachinery compressors, turbines and performance maps
     systems      ready-made subsystems ("boxes") and example systems
 '''
 import importlib
 
 from ._base import ModelBase, SysBase
 
-__all__ = ["ModelBase", "SysBase", "components", "electrochem", "flow", "heat", "interfaces", "media",
+__all__ = ["ModelBase", "SysBase", "components", "electrochem", "flow", "heat", "interfaces", "media", "turbomachinery",
            "reactors", "separation", "thermo", "systems"]
 
 _SUBMODULES = frozenset(__all__[2:])

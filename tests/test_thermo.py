@@ -202,3 +202,16 @@ def test_coolprop_medium():
     assert m.h == pytest.approx(ref.h, abs=0.5)
     assert m.cp == pytest.approx(ref.cp, rel=0.05)       # kJ/mol/K, like every other medium
     assert m.rho > 0
+
+
+def test_transport_properties():
+    air = media.Air()
+    air.T = 300.0
+    assert air.mu == pytest.approx(1.85e-5, rel=0.03) and air.k == pytest.approx(0.026, rel=0.05)
+    assert 0.6 < air.Pr < 0.8
+    water = media.Water()
+    water.T = 300.0
+    assert water.mu == pytest.approx(8.5e-4, rel=0.1) and water.k == pytest.approx(0.61, rel=0.05)
+    # the flange passes them on
+    f = interfaces.Flange('f', Medium=media.Air(), T=500.0)
+    assert (f.mu, f.k, f.Pr) == (f.Medium.mu, f.Medium.k, f.Medium.Pr)

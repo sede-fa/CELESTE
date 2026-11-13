@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.optimize as spo
 
-from ..CSL import interfaces, media, ModelBase, components as comp
+from ..CSL import interfaces, media, ModelBase, components as comp, turbomachinery
 from .. import solvers
 from . import interfacesFT as interFT, mediaFT, thermoFT
 
@@ -410,7 +410,7 @@ class ChgMedium(comp.ChgMedium):
         if phase1 is not None:
             self.F1 = interFT.Flange(name + '.F1', Medium=Medium1, phase=phase1)
 
-class CompIsent(comp.CompIsent):
+class CompIsent(turbomachinery.CompIsent):
     """
     Isentropic compressor extending from the CompressorFT Class. 
     One stream is entering and one stream is coming out. 

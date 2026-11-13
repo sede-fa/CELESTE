@@ -44,7 +44,7 @@ class Splitter(ModelBase):
         self._init_state(self._spread(legacy, ['F0', 'F1', 'F2'], T=T, P=P))
 
     @property
-    def split(self):
+    def split(self) -> float:
         return self._split
 
     @split.setter

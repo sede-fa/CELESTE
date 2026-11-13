@@ -51,43 +51,74 @@ class Flange(Base):
         #if np.sum(self.Xi)>1.01:
         #    print(f'Warning: {self.name}.Xi has sum greater than 1:  sum({self.name}.Xi) = {np.sum(self.Xi)}')
 
+        # The superclass Base() already makes the following assignments. But it's repeated here just for the sake of avoiding Pyright warnings/errors.
+        self.n: float = n
+
     @property
-    def mw(self):
+    def mw(self) -> float:
         '''
         Molar Mass /g/mol
         '''
         return self.Medium.getMW()
 
     @property
-    def cp(self):
+    def cp(self) -> float:
         '''
         Specific Heat Capacity /kJ/mol/K
         '''
         return self.Medium.cp
     
     @property
-    def h(self):
+    def h(self) -> float:
         '''
         Specific Enthalpy /kJ/mol
         '''
         return self.Medium.h
 
     @property
-    def s(self):
+    def s(self) -> float:
         '''
         Specific Entropy /kJ/mol/K
         '''
         return self.Medium.s
 
     @property
-    def g(self):
+    def g(self) -> float:
         '''
         Specific Gibbs Energy /kJ/mol
         '''
         return self.Medium.g
+    
+    @property
+    def rho(self) -> float:
+        '''
+        Density /kg/m3
+        '''
+        return self.Medium.rho
+    
+    @property
+    def mu(self) -> float:
+        '''
+        Dynamic Viscosity /Pa.s
+        '''
+        return self.Medium.mu
+    
+    @property
+    def k(self) -> float:
+        '''
+        Thermal Conductivity /W/m/K
+        '''
+        return self.Medium.k
+    
+    @property
+    def Pr(self) -> float:
+        '''
+        Prandtl Number /-
+        '''
+        return self.Medium.Pr
 
     @property
-    def T(self):
+    def T(self) -> float:
         '''
         Absolute Temperature /K
         '''
@@ -115,7 +146,7 @@ class Flange(Base):
         #    print(f'Warning: {self.name}.Xi has sum greater than 1:  sum({self.name}.Xi) = {np.sum(self.Xi)}')
         
     @property
-    def P(self):
+    def P(self) -> float:
         '''
         Pressure /bar
         '''
@@ -139,7 +170,7 @@ class Flange(Base):
         self.Xi = self.Medium.Xi
 
     @property
-    def m(self):
+    def m(self) -> float:
         '''
         Mass Flow /g/s
         '''

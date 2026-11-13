@@ -14,7 +14,7 @@ def test_simple_systems():
     assert hs.EBcheck() == pytest.approx(0.0, abs=1e-4)
     cs = ComponentModels.SimpleCompressorSys('s', 1.0, None, 300.0, 1.0, 5.0)
     cs.run_sol()
-    assert cs.compressor.W == pytest.approx(5.0717949, rel=1e-6)
+    assert cs.compressor.W == pytest.approx(5.0881399, rel=1e-6)
     assert cs.EBcheck() == pytest.approx(0.0, abs=1e-4)
 
 
@@ -27,9 +27,9 @@ def train():
 
 def test_compression_train(train):
     assert (train.F1.T, train.F1.P) == (350.0, 3.0)
-    assert train.tot_Exloss() == pytest.approx(1.972713, rel=1e-6)
+    assert train.tot_Exloss() == pytest.approx(1.9776524, rel=1e-6)
     assert train.r_get() == ['HT1', 'HT2', 'comp1', 'comp2']
-    assert train.get_success() == {'comp1': True, 'comp2': True}
+    assert train.get_success() == {}                  # the compressors are explicit: nothing to converge
     report = train.performance_report()
     assert report['total_pressure_ratio'] == pytest.approx(3.0)
     with pytest.raises(ValueError):

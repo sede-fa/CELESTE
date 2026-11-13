@@ -84,9 +84,9 @@ def test_isentropic_compressor(eff):
     assert sol.success
     assert c.W == pytest.approx(c.F0.n*(c.F1.h - c.F0.h))
     if eff == 1.0:
-        assert c.Sgen == pytest.approx(0.0, abs=1e-4)        # mean-cp model: reversible up to the cp variation
+        assert c.Sgen == pytest.approx(0.0, abs=1e-12)       # real-gas isentropic outlet: exactly reversible
     else:
-        assert c.F1.T == pytest.approx(511.4323892, abs=1e-5) and c.W == pytest.approx(6.289629, rel=1e-6)
+        assert c.F1.T == pytest.approx(512.4878351, abs=1e-5) and c.W == pytest.approx(6.321257706, rel=1e-6)
         assert c.Sgen > 0 and c.Exloss > 0 and 0 < c.Exeff < 1
 
 
@@ -338,3 +338,54 @@ def test_gpu_input_checks():
         components.GPU_2SV2('g', media.Fuel_CH4())
     with pytest.raises(ValueError, match="Sep"):
         components.GPU_2SV2('g', media.Fuel_CH4(), Sep=np.array([1.5, 1, 1, 1, 0, 1]))
+
+
+def test_polytropic_compressor_converges_to_the_polytropic_path():
+    from celeste.CSL.turbomachinery import CompPolytropic
+    isentropic = components.CompIsent('c', media.Air(), eff=0.8)
+    isentropic.F1.P = 5.0
+    isentropic.run_sol()
+    T = []
+    for stages in (1, 10, 50, 200):
+        c = CompPolytropic('p', media.Air(), eff=0.8, stages=stages)
+        c.F1.P = 5.0
+        assert c.run_sol().success
+        T.append(c.F1.T)
+    assert T[0] == pytest.approx(isentropic.F1.T, abs=1e-9)             # one stage is the isentropic model
+    assert T[0] < T[1] < T[2] < T[3] and T[3] - T[2] < 0.3              # more stages: hotter, converging (as 1/stages)
+    c = CompPolytropic('p', media.Air(), eff=1.0)
+    c.F1.P = 5.0
+    c.run_sol()
+    assert c.Sgen == pytest.approx(0.0, abs=1e-10)
+
+
+def test_compressors_are_importable_from_components():
+    from celeste.CSL import turbomachinery
+    assert components.CompIsent is turbomachinery.CompIsent and components.Compressor is turbomachinery.Compressor
+
+
+def test_heat_exchanger_outlet_temperature_target():
+    from celeste.CSL import heat
+    for kind in ('counter-flow', 'co-flow'):
+        for n_cold in (1.0, 1.7):                                   # equal and unequal capacity rates
+            hx = heat.HexNTU('h', media.Air(), media.Air(), UA=50., HexType=kind)
+            hx.H0.T, hx.C0.T, hx.H0.n, hx.C0.n = 800.0, 300.0, 1.0, n_cold
+            hx.run_sol_fixOutletTemp(450.0, 'cold')
+            assert hx.C1.T == pytest.approx(450.0, abs=1e-6)
+    hx.run_sol_fixOutletTemp(600.0, 'hot')
+    assert hx.H1.T == pytest.approx(600.0, abs=1e-6)
+
+
+def test_mapped_compressor_and_turbine_without_map_match_the_isentropic_model():
+    from celeste.CSL.turbomachinery import CompIsent, CompressorMapped, TurbineMapped
+    c = CompressorMapped('c', None, media.Air(), PR=4.0, eta=0.8, use_map=False)
+    ref = CompIsent('r', media.Air(), eff=0.8)
+    for u in (c, ref):
+        u.F0.n = 2.0
+    ref.F1.P = 4.0
+    c.run_sol(), ref.run_sol()
+    assert c.F1.T == pytest.approx(ref.F1.T, abs=1e-9) and c.Pshaft == pytest.approx(ref.W*1e3, rel=1e-9)
+    t = TurbineMapped('t', None, media.Air(), PR=3.0, eta=0.85, use_map=False)
+    t.F0.T, t.F0.P, t.F0.n = 900.0, 6.0, 2.0
+    t.run_sol()
+    assert t.F1.P == pytest.approx(2.0) and t.F1.T < 900.0 and t.Pshaft < 0

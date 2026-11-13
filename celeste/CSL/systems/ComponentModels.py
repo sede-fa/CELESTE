@@ -5,7 +5,7 @@ Small reusable systems built from the component models.
 2. SimpleCompressorSys: source -> isentropic compressor -> sink
 3. Ncomp:               N-stage compression with inter- and after-cooling (a reusable "box")
 """
-from celeste.CSL import interfaces, media, heat, flow, components, SysBase
+from celeste.CSL import interfaces, media, heat, flow, components, turbomachinery, SysBase
 
 class SimpleHeaterSys(SysBase):
     """
@@ -42,7 +42,7 @@ class SimpleCompressorSys(SysBase):
         super().__init__(locals())
         ## initialise components with fixed parameters
         self.source = flow.SourceM(name + '.source', media.Air(), flow_in, Xi_in, T_in, P_in)
-        self.compressor = components.CompIsent(name + '.compressor', media.Air(), eff=eff)
+        self.compressor = turbomachinery.CompIsent(name + '.compressor', media.Air(), eff=eff)
         self.compressor.F1.P = P_out
         self.sink = flow.Sink(name + '.sink', media.Air())
 
@@ -76,7 +76,7 @@ class Ncomp(SysBase):
         self.heaters = []
 
         for i in range(self.N):
-            comp = components.CompIsent(f"{self.name}.comp{i+1}", Medium=Medium, eff=eff_comp[i])
+            comp = turbomachinery.CompIsent(f"{self.name}.comp{i+1}", Medium=Medium, eff=eff_comp[i])
             comp.F1.P = P_comp[i]
             heater = heat.Heater(f"{self.name}.HT{i+1}", Medium0=Medium, Medium1=Medium)
             heater.F1.T = T_HT[i]
@@ -120,7 +120,7 @@ class Ncomp(SysBase):
     def add_stage(self, eff, pressure, temp):
         """Dynamically add new compression stage"""
         self.N += 1
-        new_comp = components.CompIsent(f"{self.name}.comp{self.N}", Medium=self.Medium, eff=eff)
+        new_comp = turbomachinery.CompIsent(f"{self.name}.comp{self.N}", Medium=self.Medium, eff=eff)
         new_comp.F1.P = pressure
         new_heater = heat.Heater(f"{self.name}.HT{self.N}", Medium0=self.Medium, Medium1=self.Medium)
         new_heater.F1.T = temp

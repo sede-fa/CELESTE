@@ -84,15 +84,15 @@ FUEL_ELEMENTS = np.array([[0, 1, 1, 1, 0, 0],
                           [0, 0, 0, 0, 0, 2]])
 
 
-def fuel_residuals(n, n0, T, P, O_in=0.0):
+def fuel_residuals(n, n0, T, P, O_in=0.0, H_in=0.0):
     """
     Equations of a fuel-side stream (H2, CH4, CO2, CO, H2O, N2) at shift and reforming equilibrium:
     the C, H, O, N balances between the inlet flows ``n0`` and the outlet flows ``n`` (relative to the
-    element inflow; ``O_in`` is oxygen added from elsewhere, mol/s), then the water-gas shift and
+    element inflow; ``O_in`` and ``H_in`` are oxygen and hydrogen atoms added from elsewhere, mol/s), then the water-gas shift and
     methane reforming equilibria as ln(Q/K), at T [K] and P [bar].
     """
     n, n0 = np.asarray(n, dtype=float), np.asarray(n0, dtype=float)
-    balances = (FUEL_ELEMENTS @ n - FUEL_ELEMENTS @ n0 - np.array([0, 0, O_in, 0]))/np.maximum(FUEL_ELEMENTS @ n0, 1e-30)
+    balances = (FUEL_ELEMENTS @ n - FUEL_ELEMENTS @ n0 - np.array([0, H_in, O_in, 0]))/np.maximum(FUEL_ELEMENTS @ n0, 1e-30)
     H2, CH4, CO2, CO, H2O = np.log(n[:5]/n.sum())
     return np.concatenate((balances, [
         CO2 + H2 - CO - H2O - ln_K('WGS', T),                          # CO + H2O <-> CO2 + H2

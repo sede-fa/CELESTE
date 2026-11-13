@@ -5,7 +5,7 @@ Run with:  python examples/01_components.py
 """
 import numpy as np
 
-from celeste.CSL import components, flow, heat, interfaces, media, reactors
+from celeste.CSL import components, flow, heat, interfaces, media, reactors, turbomachinery
 
 # --- a stream: the Flange -------------------------------------------------------------------------
 air = interfaces.Flange('air', media.Air(), n=1.0, Xi=np.array([0.21, 0.79]), T=300.0, P=1.0)
@@ -13,7 +13,7 @@ print(air, '\n')
 print(f'exergy {air.Ex:.4f} kJ/mol, entropy {air.s:.5f} kJ/mol/K\n')
 
 # --- compressor and cooler --------------------------------------------------------------------------
-comp = components.CompIsent('comp', media.Air(), eff=0.8)
+comp = turbomachinery.CompIsent('comp', media.Air(), eff=0.8)
 comp.F0.T = 300.0
 comp.F0.P = 1.0
 comp.F1.P = 5.0

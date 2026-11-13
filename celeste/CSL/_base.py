@@ -10,6 +10,9 @@ from ._mixin.graph import GraphMixin
 from ._mixin.analysis import ReportingMixin
 from ._mixin.recycle import RecycleMixin
 
+from typing import Any
+from numpy._typing._array_like import NDArray
+
 class ModelBase(Base):
     '''
     Base for creating models such as pins and vessels with flexible attribute definition
@@ -30,7 +33,7 @@ class ModelBase(Base):
     def sol_seq(self):
         return None
 
-    def Eqs(self):
+    def Eqs(self) -> list[float] | NDArray[np.float64]:
         return []
 
     @property
@@ -217,7 +220,7 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
             
         self.Eq = np.append(self.Eq, Eq)
 
-    def connect_seq(self, pin1, pin2, direction='F', store=False) -> None:
+    def connect_seq(self, pin1:Flange, pin2:Flange, direction:str='F', store:bool=False) -> None:
         '''
         forces assignment of one pins conditions to the other
 

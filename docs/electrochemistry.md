@@ -56,12 +56,13 @@ the stack uses:
 |---|---|---|
 | `'mean'` (default) | E averaged over the charge passed, Vid = ∫₀¹ E(λ) dλ, where λ is the fraction of the current drawn so far, the composition at λ is the local equilibrium and T is linear in λ from the fuel inlet to the outlet | reversible work of the stack: Wid = Vid·(−I)·Ncells |
 | `'outlet'` | E at the outlet | limit for a stack whose cells run at one voltage: the outlet is where the local Nernst potential is highest (electrolysis) or lowest (fuel cell) |
+| `'average'` | E at the arithmetic mean of the inlet and outlet mole fractions, at the outlet temperature | the former `SOC_Nernst_avg` |
 | `'streams'` | (G_out − G_in)/(−I·Ncells) of the streams | the former model, for comparison |
 
-All three are available as `V_mean`, `V_nernst_out` and `V_streams`
-(`V_nernst_in` gives the inlet value). `Vop = Vid − f_ASR·ASR·j`, with the
+All four are available as `V_mean`, `V_nernst_out`, `V_average` and `V_streams`
+(`V_nernst_in` gives the inlet value); `Wid = −Vid·I·Ncells` is the ideal work. `Vop = Vid − f_ASR·ASR·j`, with the
 area-specific resistance averaged along the cell (`ASR_mean`; T is linear in
-the charge, so the average is analytic). The voltages are properties, computed
+the charge, so a four-point quadrature is exact to rounding). The voltages are properties, computed
 when read.
 
 **The Gibbs-energy approach when the temperature changes.** For an isothermal
@@ -80,3 +81,22 @@ evaluates ΔG_r of the reaction at the temperature where the charge passes.
 A feed that is not at equilibrium relaxes at the inlet. That relaxation releases
 Gibbs energy that `V_streams` counts as electrochemical work and `V_mean` does
 not; for the co-electrolysis feed of the tests the two differ by 8 mV.
+
+
+## Proton conducting cell (`CSL.electrochem.PCC`)
+
+`SOC` and `PCC` share one base class (`_FuelStack`) that holds the equations, the energy specification, the
+solution, the ideal voltage models and the second-law quantities. A stack class only says how the charge moves
+atoms: through four small hooks (`fuel_transfer`, `air_flows`, `nernst_x`, `I_ion`).
+
+| | SOC | PCC |
+|---|---|---|
+| charge carrier | O²⁻, n_O = Ncells·I/(2F) | H⁺, n_H = Ncells·I/F·EffFar^∓1 |
+| fuel side | gains n_O oxygen atoms | loses n_H hydrogen atoms |
+| air side | O2, N2: consumes ½ n_O O2 | O2, N2, H2O: consumes ¼ n_H O2, forms ½ n_H H2O |
+| steam in the Nernst potential | fuel side | air side |
+
+`EffFar` is the Faradaic efficiency of the PCC (ionic current per electronic current in electrolysis, the inverse in
+fuel cell mode). `asr_choice` (0 to 4) selects the area-specific resistance correlation, see `PCC.ASR`; choice 1 is
+valid only from 773 to 923 K and raises outside. The fuel is `Fuel_CH4()`, the air `AirHumid()`. The former
+classes `PCC_base`, `PCC_delG` (`V_model='streams'`) and `PCC_Nernst_avg` (`V_model='average'`) are kept.

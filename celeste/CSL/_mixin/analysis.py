@@ -211,7 +211,7 @@ class ReportingMixin:
         """Total work of pumps and compressors [kJ/s]."""
         W = 0
         for i, v in self.get_Electric().items():
-            if isinstance(v, (CSL.components.Pump, CSL.components.Compressor)) and 'valve' not in i and 'Valve' not in i:
+            if isinstance(v, (CSL.components.Pump, CSL.turbomachinery.Compressor)) and 'valve' not in i and 'Valve' not in i:
                 W += np.where(np.abs(v.W) > 1e-7, v.W, 0)
         return W
 

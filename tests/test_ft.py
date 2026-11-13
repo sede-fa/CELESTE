@@ -124,7 +124,7 @@ def test_ft_units_run():
     h.ExBs()
     assert np.isfinite(h.Exloss)
     c = componentsFT.CompIsent('c', mediaFT.LightGas(), eff=0.8)
-    assert c.run_sol().success and c.F1.T == pytest.approx(350.848, abs=1e-2)
+    assert c.run_sol().success and c.F1.T == pytest.approx(350.9861, abs=1e-3)
     m = flowFT.Mixer('m', mediaFT.LightGas())
     m.run_sol()
     assert m.F2.n == 2 and m.mass_balance() == pytest.approx(0.0, abs=1e-9)

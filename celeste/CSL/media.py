@@ -14,7 +14,7 @@ from numpy.typing import NDArray as npArray
 
 
 class Medium_Base:
-    def __init__(self, name, species:list[str]= [], reference_X=None):
+    def __init__(self, name:str, species:list[str]= [], reference_X=None):
         self.name = name
         self.species = species #empty list
         self.nX = len(self.species) 
@@ -146,7 +146,7 @@ class Fuel_MeOHL(Medium_NASAbase): #extending medium
     _default_Xi = np.array([0.2, 1e-8, 0.05, 0.05, 0.3, 1e-8, 0.4])
 
     @property
-    def rho(self):
+    def rho(self) -> float:
         return 1/(self.Yi[4]/self.rho_water() + self.Yi[6]/self.rho_MeOH())
     
     def rho_water(self):
@@ -169,9 +169,21 @@ class Atm_Air(Medium_NASAbase):
     _default_species = ['O2', 'N2', 'CO2']
     _default_Xi = np.array([0.2114, 0.7883, 0.0003])
 
+class Fluegas(Medium_NASAbase):
+    _default_species = ['O2', 'CO2', 'H2O', 'N2']
+    _default_Xi = np.array([0.05, 0.45, 0.3, 0.2])
+
+class FluegasIncomplete(Medium_NASAbase): #extending medium
+    _default_species = ['H2','CH4','CO2','CO','H2O','O2','N2']
+    _default_Xi = np.array([1e-8, 1e-8, 0.1, 1e-8, 0.4, 0.1, 0.4])
+
+class AirHumid(Medium_NASAbase): #extending medium
+    _default_species = ['O2', 'N2', 'H2O']
+    _default_Xi = np.array([0.21, 0.79, 0.])
+
 #%% CP Media
 class Medium_CPbase(Medium_Base, thermo.Thermo_CP):
-    def __init__(self, name, species=[], T=298.15, Xi=None, P=1., phase='gas', EOS='HEOS'):
+    def __init__(self, name, species=[], T=298.15, Xi=None, P:float = 1., phase:str='gas', EOS:str='HEOS'):
         Medium_Base.__init__(self, name, species, Xi) 
         thermo.Thermo_CP.__init__(self, species=species, T=T, Xi=Xi, P=P, EOS=EOS, phase=phase)
         self.phase = phase
@@ -181,7 +193,7 @@ class Medium_CPbase(Medium_Base, thermo.Thermo_CP):
         return type(self)(self.name, self.phase, self.EOS)
 
 class Fuel_CH4_CP(Medium_CPbase): #extending medium
-    def __init__(self, name = 'Fuel_CH4_CP', phase='gas', EOS='HEOS'):
+    def __init__(self, name: str = 'Fuel_CH4_CP', phase:str='gas', EOS:str='HEOS'):
         super().__init__(name, species=['H2','CH4','CO2','CO','H2O','N2'], Xi=np.array([0.1, 1e-8, 1e-8, 1e-8, 0.9, 1e-8]), phase=phase, EOS=EOS) 
 
 

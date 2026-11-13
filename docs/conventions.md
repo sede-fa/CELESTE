@@ -96,7 +96,7 @@ on the flanges and is set there, both for a stand-alone unit and inside a
 system:
 
 ```python
-comp = components.CompIsent('comp', media.Air(), eff=0.8)   # design
+comp = turbomachinery.CompIsent('comp', media.Air(), eff=0.8)   # design
 comp.F0.n = 10.0  # feed
 comp.F0.T = 300.0
 comp.F0.P = 1.0

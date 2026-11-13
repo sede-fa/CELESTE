@@ -52,6 +52,19 @@ version may notice.
   three available as `V_mean`, `V_nernst_out`, `V_streams`; extents `xi_WGS`, `xi_MSR` from the flows. See
   `docs/electrochemistry.md`
 - `CSL.components.ChgMedium` (moved from the FT module, which now extends it)
+- **`CSL.electrochem.PCC`** (from main, rebuilt on the SOC machinery): proton conducting cell with the same
+  equations, energy specification (`T=` / `Q=`), ideal voltage models and solution as the SOC; `SOC` and `PCC` share
+  `_FuelStack`. `PCC_base`, `PCC_delG`, `PCC_Nernst_avg` and `SOC_Nernst_avg` remain as thin variants. SOC and PCC
+  gain `V_model='average'`, `Wid`, `AU`, `Lambda` and a `j` setter
+- **`CSL.turbomachinery`** (from main): compressors and turbines with performance maps. The compressor models
+  live here (`Compressor`, `CompIsot`, `CompIsent`, `CompressorMapped`, `Turbine`, `TurbineMapped`); one
+  real-gas path (`_RealGasPath`) serves the isentropic compressor, the polytropic compressor and the mapped
+  compressors and turbines. **`CompPolytropic`**: polytropic efficiency, integrated in `stages` (default 50) isentropic
+  steps
+- Transport properties (from main): `mu`, `k`, `Pr` of the media (Chung viscosity, Eucken conductivity, Wilke and
+  Mason–Saxena mixing; CoolProp for `*_CP`) and of the flanges, `Flange.rho`; vectorised in NumPy (no Numba)
+- `media.Fluegas`, `FluegasIncomplete`, `AirHumid` (from main)
+- `HexNTU.run_sol_fixOutletTemp(Ttarg, stream)` (from main): UA that reaches an outlet temperature
 - `CSL.equilibrium` – equilibrium constants shared by reactors and the SOC, computed from the NASA Gibbs
   energies (`K_eq(T, reaction)`; `K_WGS`, `K_rWGS`, `K_MSR`, `K_PSR`, `K_NH3`, `K_MeOH_CO2`, `K_MeOH_CO`)
 - `jx.units.Stream.replace(n=, T=, P=, x=)`: a copy with a changed state (streams are immutable)
@@ -103,6 +116,8 @@ version may notice.
 
 ### Fixed
 
+- `HexNTU.run_sol_fixOutletTemp` (main) missed the factor `Cmin` in the UA of a counter-flow exchanger with equal capacity rates (Cr = 1), so the outlet target was not reached
+
 - `SOC`: `Qloss` follows the sign convention of `Q` and `W` (positive into the stack, a loss is negative) and
   now enters the entropy generation (heat exchanged at T0). Before, it was described as a loss but entered the
   energy balance as a heat input, and `Sgen` ignored it. Results with the default `Qloss = 0` are unchanged.
@@ -152,6 +167,7 @@ version may notice.
 
 | What | Before | Now | Size of the effect |
 |---|---|---|---|
+| `CompIsent` outlet state | ideal-gas formula with the mean heat capacity of inlet and outlet, solved with `root` | real-gas isentropic outlet from the medium, then the efficiency correction (also used by the mapped compressors and turbines); explicit, so `run_sol` returns a result with `success=True` and `get_success()` no longer lists compressors | outlet temperature 511.43 → 512.49 K and work 6.290 → 6.321 kJ/s for air, 300 K, 1 → 5 bar, eff 0.8; the reversible case now has Sgen = 0 exactly (was 1e-4) |
 | `GPU_*` `Exloss`, `Sgen` | exergy in − exergy out (negative for a separation), ΔS | exergy in + W − exergy out = W − Wid ≥ 0; ΔS − Q_amb/T0, so Exloss = T0·Sgen | GPU rows of `exdest_df` grow by the separation work, e.g. 0.94 kW in `SOECSys` |
 | `SysBase.MBcheck()`, `EBcheck()` | sources and sinks only, `MBcheck` out − in; `EBcheck` from the heater / heat / work tables | boundary streams from the recorded connections, in − out; Σ(Q + W) of every unit | sign of `MBcheck`; `EBcheck` now closes for boxes without sources and sinks (e.g. `SOCsysRecupe`, `CO2Sys`) |
 | `Valve` outlet temperature | equal to the inlet | isenthalpic | none for ideal-gas media; Joule–Thomson cooling for `*_PR` media |
@@ -186,6 +202,8 @@ These keep working and emit a `CelesteDeprecationWarning`:
 
 | Name | Use instead |
 |---|---|
+| `PCC_base`, `SOC_Nernst_avg` (no warning) | `PCC`, `SOC(..., V_model='average')` |
+| `PCC(Tpcc0=, Tpcc1=, extent=)` | `pcc.F0.T = ...`, `PCC(..., T=...)`, nothing |
 | `HB_Adiabatic(...)` | `HB(..., Q=0)`; outlet pressure `F1_P` → pressure drop `dP` |
 | `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic` | `MeOH(..., model='equilibrium' / 'yield' / 'kinetic', T=...)` |
 | `MeOH_WGS` | `MeOH(..., model='yield', Q=0)` |

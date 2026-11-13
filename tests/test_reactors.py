@@ -314,3 +314,73 @@ def test_alkaline_electrolyser():
     assert sol.success
     assert ael.j == pytest.approx(-2.4072959, rel=1e-6) and ael.W == pytest.approx(772.5611, rel=1e-6)
     assert ael.mass_balance() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_soc_average_voltage_model_and_current_density_setter():
+    soc = _co_electrolysis(V_model='average')
+    soc.run_sol()
+    x_in, x_out = soc.nernst_x(soc.F0.Xi, soc.A0.Xi), soc.nernst_x(soc.F1.Xi, soc.A1.Xi)
+    assert soc.Vid == pytest.approx(soc.nernst(soc.F1.T, soc.F1.P, *(0.5*(np.array(x_in) + np.array(x_out)))))
+    assert electrochem.SOC_Nernst_avg('s', media.Fuel_CH4(), media.Air()).V_model == 'average'
+    soc.j = -0.5
+    assert soc.I == pytest.approx(-0.5*soc.cellArea) and soc.j == pytest.approx(-0.5)
+    assert soc.Wid == pytest.approx(-soc.Vid*soc.I*soc.Ncells*1e-3)
+
+
+def test_soc_air_ratio_and_utilisation():
+    fc = electrochem.SOC('fc', media.Fuel_CH4(), media.Air(), I=40.0, Ncells=100)
+    fc.F0.n, fc.F0.Xi = 1.0, np.array([0.9, 1e-8, 1e-8, 1e-8, 0.1, 1e-8 ])
+    fc.A0.n = 5.0
+    assert fc.run_sol().success
+    consumed = fc.A0.n*fc.A0.Xi[0] - fc.A1.n*fc.A1.Xi[0]
+    assert fc.Lambda == pytest.approx(fc.A0.n*fc.A0.Xi[0]/consumed) and fc.Lambda > 1
+    assert fc.AU == pytest.approx(consumed/(fc.A0.n*fc.A0.Xi[0]))
+    assert _co_electrolysis().Lambda != _co_electrolysis().Lambda      # nan in electrolysis mode
+
+
+def _pcc(I, **kw):
+    pcc = electrochem.PCC('p', I=I, cellArea=100., Ncells=10, EffFar=0.9, **kw)
+    pcc.F0.n = 0.3
+    pcc.F0.Xi = np.array([0.05, 0.2, 1e-8, 1e-8, 0.05, 0.7]) if I < 0 else np.array([0.6, 0.1, 0.05, 0.05, 0.1, 0.1])
+    pcc.A0.n, pcc.A0.Xi = 1.0, np.array([0.21, 0.74, 0.05])
+    pcc.F0.T = pcc.A0.T = 873.15
+    return pcc
+
+
+@pytest.mark.parametrize('I', [-30.0, 30.0])
+def test_pcc_balances_and_voltage_models(I):
+    pcc = _pcc(I)
+    assert pcc.run_sol().success
+    n0, n1 = pcc.F0.n*pcc.F0.Xi, pcc.F1.n*pcc.F1.Xi
+    C, H, O, N = pcc.ELEMENTS
+    for E, moved in ((C, 0.0), (O, 0.0), (N, 0.0), (H, pcc.n_H)):
+        assert np.dot(n0, E) - np.dot(n1, E) == pytest.approx(moved, abs=1e-12)
+    assert np.sign(pcc.n_H) == np.sign(I)                       # protons leave the fuel side in fuel cell mode
+    assert pcc.mass_balance() == pytest.approx(0.0, abs=1e-10)
+    assert pcc.energy_balance() == pytest.approx(0.0, abs=1e-10)
+    x = dict(zip(pcc.F1.Medium.species, pcc.F1.Xi))
+    assert x['CO2']*x['H2']/(x['CO']*x['H2O']) == pytest.approx(pcc.K_WGS(), rel=1e-8)
+    assert pcc.Exloss > 0 and pcc.Sgen > 0
+    # the air side forms water per proton from a quarter oxygen
+    assert pcc.A1.n*pcc.A1.Xi[2] - pcc.A0.n*pcc.A0.Xi[2] == pytest.approx(0.5*pcc.n_H)
+    assert pcc.A0.n*pcc.A0.Xi[0] - pcc.A1.n*pcc.A1.Xi[0] == pytest.approx(0.25*pcc.n_H)
+    for model in ('mean', 'outlet', 'average', 'streams'):
+        other = _pcc(I, V_model=model)
+        other.run_sol()
+        assert 0.5 < abs(other.Vid) < 1.5
+        assert other.Vop == pytest.approx(other.Vid - other.ASR_mean*other.j)
+    # former class names
+    assert electrochem.PCC_delG('p').V_model == 'streams' and electrochem.PCC_Nernst_avg('p').V_model == 'average'
+    assert issubclass(electrochem.PCC_base, electrochem.PCC)
+
+
+def test_pcc_area_specific_resistance_choices_and_current_density():
+    pcc = _pcc(-30.0)
+    pcc.run_sol()
+    assert pcc.j == pytest.approx(pcc.I*0.9/pcc.cellArea)               # electrolysis: ionic current is EffFar times smaller
+    pcc.j = 0.2
+    assert pcc.I == pytest.approx(0.2*pcc.cellArea*0.9) and pcc.j == pytest.approx(0.2)
+    for choice in range(5):
+        assert _pcc(-30.0, T=873.15, asr_choice=choice).ASR() > 0
+    with pytest.raises(ValueError):
+        _pcc(-30.0, T=1000.0).ASR()                                     # outside the validity range of the polynomial fit

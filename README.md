@@ -109,13 +109,13 @@ A system is a class derived from `SysBase`. Units are created in `__init__`,
 `seq_sol` connects them in flow order and solves them one after the other.
 
 ```python
-from celeste.CSL import SysBase, components, flow, heat, media
+from celeste.CSL import SysBase, components, flow, heat, media, turbomachinery
 
 class AirCompression(SysBase):
     def __init__(self, name, n=1.0, P_out=5.0, T_out=310.0):
         super().__init__(locals())
         self.source = flow.SourceM(name + '.source', media.Air(), F1_n=n, F1_T=300.0, F1_P=1.0)
-        self.comp = components.CompIsent(name + '.comp', media.Air(), eff=0.8)
+        self.comp = turbomachinery.CompIsent(name + '.comp', media.Air(), eff=0.8)
         self.comp.F1.P = P_out  # operating spec on the flange
         self.cooler = heat.Heater(name + '.cooler', media.Air(), media.Air())
         self.cooler.F1.T = T_out
