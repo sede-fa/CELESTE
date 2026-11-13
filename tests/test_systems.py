@@ -114,7 +114,7 @@ class RecycleLoop(SysBase):
         super().__init__(locals())
         self.src = flow.SourceM(name + '.src', media.Air(), F1_n=1.0, F1_T=400.0)
         self.mix = flow.Mixer(name + '.mix', media.Air())
-        self.mix.F1.set(n=0.1)
+        self.mix.F1.n = 0.1
         self.split = flow.Splitter(name + '.split', media.Air(), Split=ratio)
         self.snk = flow.Sink(name + '.snk', media.Air())
 
@@ -193,3 +193,17 @@ def test_energy_balance_closes_over_the_boundary(make):
     assert residual == pytest.approx(0.0, abs=1e-8*max(1.0, abs(s.q_in), abs(s.q_out)))
     balances = s.unit_balances()
     assert (balances.energy.abs() < 1e-6).all() and (balances.mass.abs() < 1e-6).all()
+
+
+def test_soc_heat_loss_follows_the_sign_convention():
+    """Qloss is heat into the stack like Q and W: a loss is negative and must be made up by Q."""
+    def run(qloss):
+        s = SOCsystem.SOCBasicSys('s', 1.0, None, 1.0, None, -50.0, 100)
+        s.soc.Qloss = qloss
+        s.run_sol()
+        return s
+    ref, lossy = run(0.0), run(-5.0)
+    assert lossy.soc.Q == pytest.approx(ref.soc.Q + 5.0, rel=1e-9)
+    assert lossy.EBcheck() == pytest.approx(0.0, abs=1e-9)
+    # the loss leaves at T0: no exergy with it, so it shows up as destruction and as entropy generation
+    assert lossy.soc.Exloss - 298.15*lossy.soc.Sgen == pytest.approx(ref.soc.Exloss - 298.15*ref.soc.Sgen, abs=1e-9)

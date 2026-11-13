@@ -4,6 +4,7 @@ Electrochemical reactors
 
 from . import interfaces, ModelBase
 from . import equilibrium as eq
+from .exergy import T0
 from .. import solvers
 import numpy as np
 import scipy.optimize as spo
@@ -29,7 +30,8 @@ class SOC(ModelBase):
         Ncells:    number of cells
         f_ASR:     multiplier on the area specific resistance correlation
         extent:    subtract the Gibbs energy of the internal reforming reaction from the ideal work
-        Qloss:     heat loss in [kJ/s]
+        Qloss:     heat exchanged with the surroundings in [kJ/s]; like Q and W positive into the stack, so a
+                   loss is negative (Qloss = -5 means 5 kW lost)
 
     Ports: F0 -> F1 (fuel side), A0 -> A1 (air side)
 
@@ -145,7 +147,7 @@ class SOC(ModelBase):
 
     @property
     def Exth(self):
-        # Qloss = 0, change Exth when Qloss is not zero
+        # Qloss crosses the boundary at T0 and carries no exergy
         return self.Q*(1 - (298.15/self.F1.T))  
     
     @property
@@ -184,7 +186,7 @@ class SOC(ModelBase):
 
     @property
     def Sgen(self):
-        return self.F1.s*self.F1.n + self.A1.s*self.A1.n - self.F0.s*self.F0.n - self.A0.s*self.A0.n - self.Q/self.F1.T
+        return self.F1.s*self.F1.n + self.A1.s*self.A1.n - self.F0.s*self.F0.n - self.A0.s*self.A0.n - self.Q/self.F1.T - self.Qloss/T0
         
     def f_sol(self, x):
         x = np.abs(x)
