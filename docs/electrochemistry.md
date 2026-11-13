@@ -13,10 +13,21 @@ and methane-reforming equilibrium. Its outlet follows from three extents:
 | water-gas shift | CO + H2O ⇌ CO2 + H2 | unknown |
 | methane reforming | CH4 + H2O ⇌ CO + 3 H2 | unknown |
 
-The element balances therefore hold by construction. ξ_WGS and ξ_MSR follow from
-the two mass-action laws, written as ln(Q/K) = 0 and solved by a damped Newton
-method with the analytical Jacobian; the constants come from the NASA Gibbs
-energies (`CSL.equilibrium`). The air side loses ½·ξ_EC of O2. With the
+The element balances therefore hold by construction. The system of equations
+(`Eqs`) is
+
+| Unknown | Equation |
+|---|---|
+| ξ_WGS | WGS equilibrium, ln(x_CO2·x_H2 / (x_CO·x_H2O)) − ln K_WGS = 0 |
+| ξ_MSR | MSR equilibrium, ln(x_CO·x_H2³·P² / (x_CH4·x_H2O)) − ln K_MSR = 0 |
+| T_out (only with `Q=`) | energy balance, Q(T_out) − Q_spec = 0 |
+
+with the constants from the NASA Gibbs energies (`CSL.equilibrium`).
+`run_sol` solves the two equilibria for an isothermal stack; with a heat duty it
+solves the energy balance for T_out with the extents at equilibrium at each trial
+temperature. The equilibrium at a given temperature (`local_equilibrium`) uses
+Newton's method with the analytical Jacobian, because the trace species of a
+typical feed (1e-8 CH4) make the residuals too steep for a generic solver. The air side loses ½·ξ_EC of O2. With the
 CO2/CO couple instead of H2/H2O as the electrochemical reaction the outlet would
 be the same, because the shift reaction is at equilibrium.
 

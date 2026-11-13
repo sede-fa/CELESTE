@@ -99,6 +99,9 @@ version may notice.
 - `SOC`: `Qloss` follows the sign convention of `Q` and `W` (positive into the stack, a loss is negative) and
   now enters the entropy generation (heat exchanged at T0). Before, it was described as a loss but entered the
   energy balance as a heat input, and `Sgen` ignored it. Results with the default `Qloss = 0` are unchanged.
+- `SOC.EnthalpyEfficiency`: the methane heating value used CO instead of CH4 (CO2 + 2 H2O − CO − 2 O2), and the
+  heating values were taken at the stack temperature. It now uses the lower heating values of the medium
+  (`Flange.LHV`, 25 °C): default electrolysis case 0.9707 → 0.9453.
 - `Mixer`: two inlets within 0.001 % in temperature were treated as equal, so the outlet temperature jumped by up
   to a few mK; this stalled recycle solvers near convergence.
 - A medium created with its own species list (`media.Fuel_CH4(species=[...], Xi=...)`) was reset to the
