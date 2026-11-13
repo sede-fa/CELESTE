@@ -34,7 +34,8 @@ class SOC(ModelBase):
     The current fixes the oxygen exchanged with the air side, n_O = Ncells*I/(2F). Solving for the
     logarithms keeps every flow positive, also for trace species (1e-8 CH4 in an electrolysis feed).
 
-    Energy specification (one of them):
+    Energy specification (one of them; ``soc.T = ...`` / ``soc.Q = ...`` switch it on an existing model and
+    select the matching ``Eqs`` / ``f_sol``):
         T:  isothermal stack at T [K] (default 1073.15); Q is computed
         Q:  heat added [kJ/s]; Q=0 is adiabatic and the outlet temperature is solved
 
@@ -71,12 +72,15 @@ class SOC(ModelBase):
             raise ValueError(f"{name}: V_model must be 'mean', 'outlet' or 'streams', not {V_model!r}")
         super().__init__(dict(name=name, I=I, cellArea=cellArea, Ncells=Ncells, f_ASR=f_ASR, Qloss=Qloss,
                               V_model=V_model, n_nodes=n_nodes))
-        self.T_spec, self.Q_spec = T, Q
         self.F0 = interfaces.Flange(name + '.F0', Medium=MediumF, T=T_in, P=P_in)
         self.F1 = interfaces.Flange(name + '.F1', Medium=MediumF, T=T or T_in, P=P_in)
         self.A0 = interfaces.Flange(name + '.A0', Medium=MediumA, T=T_in, P=P_in)
         self.A1 = interfaces.Flange(name + '.A1', Medium=MediumA, T=T or T_in, P=P_in)
         self._V_mean = self._ASR_mean = np.nan
+        if Q is None:
+            self.T = T
+        else:
+            self.Q = Q
 
     # ---- specification ------------------------------------------------------------------------------
     @property
@@ -92,6 +96,7 @@ class SOC(ModelBase):
     def T(self, value):
         '''Setting T makes the stack isothermal at T.'''
         self.T_spec, self.Q_spec = value, None
+        self.Eqs, self.f_sol, self.n_unknowns = self.Eqs_T, self.f_sol_T, 6
 
     @property
     def Q(self):
@@ -102,6 +107,7 @@ class SOC(ModelBase):
     def Q(self, value):
         '''Setting Q (0 for adiabatic) makes the outlet temperature follow from the energy balance.'''
         self.Q_spec, self.T_spec = value, None
+        self.Eqs, self.f_sol, self.n_unknowns = self.Eqs_Q, self.f_sol_Q, 7
 
     @property
     def P_soc(self):
@@ -261,12 +267,14 @@ class SOC(ModelBase):
                       CO + 3*H2 + 2*ln_P - CH4 - H2O - _lnK('MSR', T)]          # CH4 + H2O <-> CO + 3 H2
         return np.concatenate((balances, equilibria))
 
-    def Eqs(self):
-        '''Element balances, WGS and MSR equilibrium; with a specified heat duty also the energy balance.'''
-        Eq = list(self.fuel_residuals(self.F1.n*np.asarray(self.F1.Xi), self.F1.T))
-        if not self.isothermal:
-            Eq.append((self.Q - self.Q_spec)/self.F0.n)
-        self.Eq = np.array(Eq)
+    def Eqs_T(self):
+        '''Isothermal: element balances, WGS and MSR equilibrium.'''
+        self.Eq = self.fuel_residuals(self.F1.n*np.asarray(self.F1.Xi), self.F1.T)
+        return self.Eq
+
+    def Eqs_Q(self):
+        '''Specified heat duty: element balances, WGS and MSR equilibrium, energy balance.'''
+        self.Eq = np.append(self.Eqs_T(), (self.Q - self.Q_spec)/self.F0.n)
         return self.Eq
 
     def set_outlets(self, n, T):
@@ -279,29 +287,22 @@ class SOC(ModelBase):
     def f_sol_T(self, x):
         '''Isothermal stack: x = ln of the fuel outlet flows.'''
         self.set_outlets(np.exp(x), self.T_spec)
-        return self.Eqs()
+        return self.Eqs_T()
 
     def f_sol_Q(self, x):
         '''Specified heat duty: x = (ln of the fuel outlet flows, outlet temperature).'''
         self.set_outlets(np.exp(x[:6]), x[6])
         self.update_voltage()                    # the voltage depends on the outlet temperature
-        return self.Eqs()
-
-    def f_sol(self, x):
-        return self.f_sol_T(x) if self.isothermal else self.f_sol_Q(x)
+        return self.Eqs_Q()
 
     def run_sol(self, x0=None):
-        '''Solve f_sol_T (isothermal) or f_sol_Q (specified heat duty), starting from the feed.'''
+        '''Solve ``f_sol`` (chosen by T= / Q=), starting from the feed (and the inlet temperature).'''
         if x0 is None:
-            x0 = np.log(np.maximum(self.F0.n*np.asarray(self.F0.Xi, dtype=float), 1e-12*self.F0.n))
-        if self.isothermal:
-            sol = solvers.solve(self.f_sol_T, x0, tol=1e-9, name=self.name)
-            self.f_sol_T(sol.x)
-            self.update_voltage()
-        else:
-            x0 = np.append(x0[:6], self.F0.T) if len(x0) == 6 else x0
-            sol = solvers.solve(self.f_sol_Q, x0, tol=1e-9, name=self.name)
-            self.f_sol_Q(sol.x)
+            ln_feed = np.log(np.maximum(self.F0.n*np.asarray(self.F0.Xi, dtype=float), 1e-12*self.F0.n))
+            x0 = np.append(ln_feed, self.F0.T)[:self.n_unknowns]
+        sol = solvers.solve(self.f_sol, x0, tol=1e-9, name=self.name)
+        self.f_sol(sol.x)
+        self.update_voltage()
         return sol
 
 

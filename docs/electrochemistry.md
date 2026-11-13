@@ -17,9 +17,11 @@ n_O = Ncells·I/(2F) (negative in electrolysis). The system of equations (`Eqs`)
 The balances are scaled by the element inflow and the equilibria are in log
 form, so all residuals are of order one. Solving for the logarithms of the flows
 keeps them positive, also for trace species (1e-8 CH4 in an electrolysis feed),
-so `celeste.solvers.solve` needs no bounds. `run_sol` solves `f_sol_T`
-(isothermal, 6 unknowns) or `f_sol_Q` (heat duty, 7 unknowns, outlet
-temperature solved together with the compositions). The constants come from the
+so `celeste.solvers.solve` needs no bounds. Setting `T=` (isothermal, 6
+unknowns: `Eqs_T`, `f_sol_T`) or `Q=` (heat duty, 7 unknowns, outlet
+temperature solved together with the compositions: `Eqs_Q`, `f_sol_Q`) selects
+the matching `Eqs` and `f_sol` once; `soc.T = ...` / `soc.Q = ...` switch an
+existing model. `run_sol` solves `f_sol`. The constants come from the
 NASA Gibbs energies (`CSL.equilibrium`). The extents are reported from the
 flows: `xi_WGS` is the CO2 formed, `xi_MSR` the CH4 converted.
 
