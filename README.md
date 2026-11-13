@@ -21,7 +21,8 @@ import numpy as np
 from celeste.CSL import media, reactors
 
 reactor = reactors.MR('methanation', T=600.0, P=10.0)                    # design: isothermal at 600 K, 10 bar
-reactor.F0.set(n=10.0, Xi=np.array([0.60, 0.01, 0.20, 0.10, 0.08, 0.01]))  # feed: H2, CH4, CO2, CO, H2O, N2
+reactor.F0.n = 10.0                                                        # feed, mol/s
+reactor.F0.Xi = np.array([0.60, 0.01, 0.20, 0.10, 0.08, 0.01])             # H2, CH4, CO2, CO, H2O, N2
 reactor.run_sol()
 
 reactor.F1.Xi      # outlet composition at chemical equilibrium
@@ -37,8 +38,8 @@ reactor.Exloss     # exergy destroyed, kW
 - **Design inputs in the constructor, operating state on the flanges.** A
   unit is created with its design quantities (medium, efficiency, volume,
   model choice); feeds and operating specifications are set on the flanges,
-  e.g. `comp.F1.set(P=30.0)` for a discharge pressure or
-  `heater.F1.set(T=600.0)` for an outlet temperature.
+  e.g. `comp.F1.P = 30.0` for a discharge pressure or
+  `heater.F1.T = 600.0` for an outlet temperature.
 - **Systems are classes.** A system derives from `SysBase`, creates its units
   and connects them in flow order in `seq_sol`. Recycles are converged with
   `Recycle_Tear`. A system can be used inside another system like a unit.
@@ -114,9 +115,9 @@ class AirCompression(SysBase):
         super().__init__(locals())
         self.source = flow.SourceM(name + '.source', media.Air(), F1_n=n, F1_T=300.0, F1_P=1.0)
         self.comp = components.CompIsent(name + '.comp', media.Air(), eff=0.8)
-        self.comp.F1.set(P=P_out)                       # operating spec on the flange
+        self.comp.F1.P = P_out  # operating spec on the flange
         self.cooler = heat.Heater(name + '.cooler', media.Air(), media.Air())
-        self.cooler.F1.set(T=T_out)
+        self.cooler.F1.T = T_out
         self.sink = flow.Sink(name + '.sink', media.Air())
 
     def seq_sol(self, store=False):
@@ -158,7 +159,10 @@ hen.plot_grid_diagram()
 from celeste.CSL import media, separation
 
 drum = separation.Flash('drum', Medium=media.Fuel_CH4())
-drum.F0.set(n=10.0, T=303.15, P=20.0, Xi=np.array([0.60, 0.05, 0.10, 0.05, 0.20, 1e-8]))
+drum.F0.n = 10.0
+drum.F0.T = 303.15
+drum.F0.P = 20.0
+drum.F0.Xi = np.array([0.60, 0.05, 0.10, 0.05, 0.20, 1e-8])
 drum.run_sol()
 drum.beta          # vapour fraction: 0.802
 drum.F1, drum.F2   # gas and liquid outlet

@@ -94,7 +94,8 @@ class ModelBase(Base):
         The state keywords still work but are deprecated: the operating state belongs on the flanges.
         '''
         for port, state in self._default_state.items():
-            getattr(self, port).set(**state)
+            for var, value in state.items():
+                setattr(getattr(self, port), var, value)
         used = []
         for key, value in legacy.items():
             port, _, var = key.partition('_')
@@ -104,13 +105,13 @@ class ModelBase(Base):
             if value is None:
                 continue
             used.append(key)
-            flange.set(**{var: value})
+            setattr(flange, var, value)
         if used:
             from .._deprecation import warn_deprecated
             port = used[0].partition('_')[0]
-            example = ', '.join(f"{k.partition('_')[2]}=..." for k in used if k.partition('_')[0] == port)
+            var = used[0].partition('_')[2]
             warn_deprecated(f"{type(self).__name__}({', '.join(used)}=...): state keywords are deprecated; set the "
-                            f"operating state on the flanges, e.g. unit.{port}.set({example})",
+                            f"operating state on the flanges, e.g. unit.{port}.{var} = ...",
                             stacklevel=self._caller_level())
 
     def _caller_level(self) -> int:

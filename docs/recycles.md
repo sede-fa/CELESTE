@@ -77,7 +77,10 @@ def seq_sol(self, store=False):
     self.connect_seq(self.hx.H1, self.product.F0, store=store)
 
 def run_sol(self):
-    self.hx.H0.set(n=..., Xi=..., T=800.0, P=...)       # first guess of the effluent
+    self.hx.H0.n = ...  # first guess of the effluent
+    self.hx.H0.Xi = ...
+    self.hx.H0.T = 800.0
+    self.hx.H0.P = ...
     return self.Recycle_Tear(self.reactor.F1, self.hx.H0)
 ```
 

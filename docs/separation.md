@@ -130,7 +130,10 @@ Wagner–Pruss equation. Pentane boils at 1.013 bar at 309.2 K, hexane has
 
 ```python
 drum = componentsFT.Flash('drum', mediaFT.Syncrude(), T=310.0, P=20.0)   # or Q=0.0 for adiabatic
-drum.F0.set(n=10.0, Xi=x_effluent, T=500.0, P=20.0)
+drum.F0.n = 10.0
+drum.F0.Xi = x_effluent
+drum.F0.T = 500.0
+drum.F0.P = 20.0
 drum.run_sol()
 drum.beta, drum.water_liquid, drum.F1, drum.F2
 ```

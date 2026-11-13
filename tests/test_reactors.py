@@ -52,7 +52,9 @@ HB_FEED = np.array([0.74, 0.25, 0.01])
 
 def test_haber_bosch_isothermal_and_adiabatic():
     r = reactors.HB('r', T=673.15)
-    r.F0.set(n=1.0, Xi=HB_FEED, P=200.0)
+    r.F0.n = 1.0
+    r.F0.Xi = HB_FEED
+    r.F0.P = 200.0
     assert r.run_sol().success
     np.testing.assert_allclose(r.F1.Xi, [0.4709, 0.1615, 0.3677], atol=5e-5)
     assert r.F1.T == 673.15 and r.Q < 0
@@ -103,7 +105,10 @@ def test_haber_bosch_plug_flow_bed():
 
 def _meoh(**kw):
     r = reactors.MeOH('r', **kw)
-    r.F0.set(n=100, Xi=MEOH_FEED, T=473.15, P=50.0)
+    r.F0.n = 100
+    r.F0.Xi = MEOH_FEED
+    r.F0.T = 473.15
+    r.F0.P = 50.0
     return r
 
 

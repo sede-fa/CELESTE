@@ -14,7 +14,10 @@ MEOH_WATER = np.array([1e-8, 1e-8, 0.02, 1e-8, 0.48, 1e-8, 0.5])
 
 def test_knock_out_drum_with_nasa_media(syngas_x):
     ko = separation.Flash('ko', Medium=media.Fuel_CH4())
-    ko.F0.set(n=10.0, Xi=syngas_x, T=303.15, P=20.0)
+    ko.F0.n = 10.0
+    ko.F0.Xi = syngas_x
+    ko.F0.T = 303.15
+    ko.F0.P = 20.0
     sol = ko.run_sol()
     assert sol.success and ko.phase == 'two-phase'
     assert ko.beta == pytest.approx(0.80188, abs=2e-4)
@@ -29,11 +32,16 @@ def test_knock_out_drum_with_nasa_media(syngas_x):
 
 def test_single_phase_feed_leaves_through_one_outlet(syngas_x):
     hot = separation.Flash('f', Medium=media.Fuel_CH4())
-    hot.F0.set(n=3.0, Xi=syngas_x, T=500.0, P=20.0)
+    hot.F0.n = 3.0
+    hot.F0.Xi = syngas_x
+    hot.F0.T = 500.0
+    hot.F0.P = 20.0
     assert hot.run_sol().success
     assert hot.phase == 'vapour' and hot.F1.n == pytest.approx(3.0) and hot.F2.n == 0.0 and hot.Q == pytest.approx(0.0, abs=1e-9)
     cold = separation.Flash('f', Medium=media.Steam(), T=300.0)
-    cold.F0.set(n=3.0, T=500.0, P=1.0)
+    cold.F0.n = 3.0
+    cold.F0.T = 500.0
+    cold.F0.P = 1.0
     cold.run_sol()
     assert cold.phase == 'liquid' and cold.F2.n == pytest.approx(3.0) and cold.F1.n == 0.0
     assert cold.Q == pytest.approx(3.0*(cold.F2.h - cold.F0.h))
@@ -41,15 +49,23 @@ def test_single_phase_feed_leaves_through_one_outlet(syngas_x):
 
 def test_specifications(syngas_x):
     iso = separation.Flash('f', Medium=media.Fuel_CH4(), T=320.0, P=10.0)
-    iso.F0.set(n=1.0, Xi=syngas_x, T=600.0, P=20.0)
+    iso.F0.n = 1.0
+    iso.F0.Xi = syngas_x
+    iso.F0.T = 600.0
+    iso.F0.P = 20.0
     iso.run_sol()
     assert (iso.T, iso.P, iso.F2.T, iso.F1.P) == (320.0, 10.0, 320.0, 10.0)
     drop = separation.Flash('f', Medium=media.Fuel_CH4(), dP=0.5)
-    drop.F0.set(Xi=syngas_x, T=310.0, P=20.0)
+    drop.F0.Xi = syngas_x
+    drop.F0.T = 310.0
+    drop.F0.P = 20.0
     drop.run_sol()
     assert drop.P == 19.5
     duty = separation.Flash('f', Medium=media.Fuel_CH4(), Q=-40.0)
-    duty.F0.set(n=10.0, Xi=syngas_x, T=400.0, P=20.0)
+    duty.F0.n = 10.0
+    duty.F0.Xi = syngas_x
+    duty.F0.T = 400.0
+    duty.F0.P = 20.0
     sol = duty.run_sol()
     assert sol.success and duty.Q == pytest.approx(-40.0, abs=1e-6) and duty.phase == 'two-phase'
     assert 303.15 < duty.T < 400.0
@@ -59,7 +75,10 @@ def test_specifications(syngas_x):
 
 def test_adiabatic_flash_of_a_real_fluid():
     fl = separation.Flash('fl', Medium=media.Fuel_MeOH_PR(), P=1.2, Q=0.0)
-    fl.F0.set(n=5.0, Xi=MEOH_WATER, T=420.0, P=30.0)
+    fl.F0.n = 5.0
+    fl.F0.Xi = MEOH_WATER
+    fl.F0.T = 420.0
+    fl.F0.P = 30.0
     assert fl.F0.Medium.state == 'two-phase' or fl.F0.Medium.state == 'liquid'
     sol = fl.run_sol()
     assert sol.success and fl.Q == pytest.approx(0.0, abs=1e-6)
@@ -92,13 +111,21 @@ def test_real_fluid_medium_handles_phase_change(syngas_x):
     assert water.Medium.state == 'vapour' and water.Medium.beta == 1.0
     # a cooler with a real-fluid medium is a partial condenser
     cooler = heat.Heater('c', media.Fuel_CH4_PR(), media.Fuel_CH4_PR())
-    cooler.F0.set(n=10.0, Xi=syngas_x, T=600.0, P=20.0)
-    cooler.F1.set(T=303.15, P=20.0)
+    cooler.F0.n = 10.0
+    cooler.F0.Xi = syngas_x
+    cooler.F0.T = 600.0
+    cooler.F0.P = 20.0
+    cooler.F1.T = 303.15
+    cooler.F1.P = 20.0
     cooler.run_sol()
     assert cooler.F1.Medium.state == 'two-phase' and cooler.F1.Medium.beta == pytest.approx(0.80188, abs=2e-4)
     dry = heat.Heater('c', media.Fuel_CH4(), media.Fuel_CH4())
-    dry.F0.set(n=10.0, Xi=syngas_x, T=600.0, P=20.0)
-    dry.F1.set(T=303.15, P=20.0)
+    dry.F0.n = 10.0
+    dry.F0.Xi = syngas_x
+    dry.F0.T = 600.0
+    dry.F0.P = 20.0
+    dry.F1.T = 303.15
+    dry.F1.P = 20.0
     dry.run_sol()
     assert cooler.Q < dry.Q - 70.0                                 # the latent heat is part of the duty
     assert cooler.Exloss > 0

@@ -78,8 +78,12 @@ class GPU_1S(GPUbase):
 
     Example:
         gpu = components.GPU_1S('cond', media.Fuel_CH4(), media.Fuel_CH4L(), eff=0.7)
-        gpu.F0.set(n=100, Xi=np.array([0.1, 1e-8, 1e-8, 1e-8, 0.9, 1e-8]), T=873.15, P=3.0)
-        gpu.F1.set(T=673.15, P=1.0)
+        gpu.F0.n = 100
+        gpu.F0.Xi = np.array([0.1, 1e-8, 1e-8, 1e-8, 0.9, 1e-8])
+        gpu.F0.T = 873.15
+        gpu.F0.P = 3.0
+        gpu.F1.T = 673.15
+        gpu.F1.P = 1.0
         gpu.run_sol()
     """
     def __init__(self, name:str, Medium1:media.Medium_Base, Medium2:media.Medium_Base, eff:float=0, **legacy):
@@ -111,7 +115,10 @@ class GPU_2SV2(GPUbase):
 
     Example (H2, CH4, N2 and parts of CO2 and CO to F1; water to F2):
         gpu = components.GPU_2SV2('gpu', media.Fuel_CH4(), Sep=np.array([1, 1, 0.5, 0.4, 0, 1]), eff=0.7)
-        gpu.F0.set(n=100, Xi=np.array([0.1, 0.3, 0.05, 0.05, 0.5, 1e-8]), T=873.15, P=3.0)
+        gpu.F0.n = 100
+        gpu.F0.Xi = np.array([0.1, 0.3, 0.05, 0.05, 0.5, 1e-8])
+        gpu.F0.T = 873.15
+        gpu.F0.P = 3.0
         gpu.run_sol()
     """
     def __init__(self, name:str, Medium:media.Medium_Base, Sep:npArray[np.float64]|None=None, eff:float=1, **legacy):
@@ -174,8 +181,12 @@ class GPU_3S(GPUbase):
 
     Example (H2 to F1, CH4 to F2, water to F3):
         gpu = components.GPU_3S('gpu', media.Fuel_CH4(), sep=np.array([1, 0, 1, 1, -1, 1]), eff=0.7)
-        gpu.F0.set(n=100, Xi=np.array([0.1, 0.1, 1e-8, 1e-8, 0.8, 1e-8]), T=873.15, P=3.0)
-        gpu.F1.set(T=673.15, P=1.0)
+        gpu.F0.n = 100
+        gpu.F0.Xi = np.array([0.1, 0.1, 1e-8, 1e-8, 0.8, 1e-8])
+        gpu.F0.T = 873.15
+        gpu.F0.P = 3.0
+        gpu.F1.T = 673.15
+        gpu.F1.P = 1.0
         gpu.run_sol()
     """
     def __init__(self, name:str, Medium:media.Medium_Base, sep:npArray[np.float64]|None=None, eff:float=1.,
@@ -500,7 +511,9 @@ class Pump(ModelBase):
 
     Example:
         pump = components.Pump('pump', media.Fuel_CH4L(), eff=0.75, P_out=30.0)
-        pump.F0.set(n=100.0, T=298.15, P=1.0)
+        pump.F0.n = 100.0
+        pump.F0.T = 298.15
+        pump.F0.P = 1.0
         pump.run_sol()
     '''
      

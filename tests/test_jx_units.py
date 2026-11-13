@@ -4,6 +4,7 @@ import pytest
 
 jax = pytest.importorskip('jax')
 pytest.importorskip('equinox')
+import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 
 from celeste.CSL import components, flow, heat, media, reactors  # noqa: E402
@@ -16,8 +17,10 @@ FUEL = ideal.ideal_gas(['H2', 'CH4', 'CO2', 'CO', 'H2O', 'N2'])
 
 def test_heater_matches_csl():
     ref = heat.Heater('h', media.Air(), media.Air())
-    ref.F0.set(n=2.0, Xi=X_AIR, T=300.0)
-    ref.F1.set(T=800.0)
+    ref.F0.n = 2.0
+    ref.F0.Xi = X_AIR
+    ref.F0.T = 300.0
+    ref.F1.T = 800.0
     ref.run_sol()
     out, Q = units.Heater(AIR, 800.0)(units.Stream(2.0, 300.0, 1.0, X_AIR))
     assert float(Q) == pytest.approx(ref.Q, rel=1e-10) and float(out.T) == 800.0
@@ -25,8 +28,8 @@ def test_heater_matches_csl():
 
 def test_mixer_matches_csl():
     ref = flow.Mixer('m', media.Air())
-    ref.F0.set(n=1)
-    ref.F1.set(n=2)
+    ref.F0.n = 1
+    ref.F1.n = 2
     ref.F0.T, ref.F1.T = 300.0, 600.0
     ref.run_sol()
     out = units.Mixer(AIR)(units.Stream(1.0, 300.0, 1.0, X_AIR), units.Stream(2.0, 600.0, 1.0, X_AIR))
@@ -39,7 +42,7 @@ def test_compressor():
     assert float(ideal_out.s(AIR)) == pytest.approx(float(feed.s(AIR)), abs=1e-12)        # exactly isentropic
     out, W = units.Compressor(AIR, 5.0, 0.8)(feed)
     ref = components.CompIsent('c', media.Air(), eff=0.8)
-    ref.F1.set(P=5.0)
+    ref.F1.P = 5.0
     ref.run_sol()
     assert float(W) == pytest.approx(ref.W, rel=1e-2)           # the CSL model uses a mean heat capacity
     assert float(out.T) == pytest.approx(ref.F1.T, abs=1.5)
@@ -81,3 +84,14 @@ def test_vmap_and_grad_through_a_flowsheet():
     assert float(d_dT) == pytest.approx(fd, rel=1e-5)
     d_dP = jax.grad(methane_out, argnums=1)(700.0, 10.0)
     assert float(d_dP) > 0                                      # and at high pressure
+
+
+def test_stream_replace():
+    feed = units.Stream(n=1.0, T=500.0, P=10.0, x=X_AIR)
+    hot = feed.replace(T=600.0)
+    assert float(hot.T) == 600.0 and float(feed.T) == 500.0 and float(hot.P) == 10.0   # original unchanged
+    # usable inside jit and grad
+    dH = jax.grad(lambda T: feed.replace(T=T).H(AIR))(700.0)
+    assert float(dH) == pytest.approx(float(feed.n*ideal.heat_capacity(700.0, X_AIR, AIR)), rel=1e-10)
+    with pytest.raises(TypeError, match="no field"):
+        feed.replace(Q=1.0)

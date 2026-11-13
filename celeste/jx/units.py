@@ -47,6 +47,17 @@ class Stream(eqx.Module):
         self.n, self.T, self.P = (jnp.asarray(v, dtype=float) for v in (n, T, P))
         self.x = jnp.asarray(x, dtype=float)
 
+    def replace(self, **changes) -> "Stream":
+        """
+        A copy with some of ``n``, ``T``, ``P``, ``x`` changed, e.g. ``feed.replace(T=600.0, P=20.0)``.
+        Streams are immutable (Equinox modules), so this is how a state is "set"; it works under
+        ``jit``, ``vmap`` and ``grad``.
+        """
+        unknown = set(changes) - {'n', 'T', 'P', 'x'}
+        if unknown:
+            raise TypeError(f"Stream has no field(s) {sorted(unknown)}; use n, T, P, x")
+        return Stream(**{k: changes.get(k, getattr(self, k)) for k in ('n', 'T', 'P', 'x')})
+
     def h(self, gas: ideal.IdealGas):
         """Molar enthalpy, kJ/mol"""
         return ideal.enthalpy(self.T, self.x, gas)

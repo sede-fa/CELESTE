@@ -375,7 +375,7 @@ class HB(ExtentReactor):
         T, Q:   energy specification (see :class:`ExtentReactor`)
         dP:     pressure drop [bar]
 
-    Inlet state: ``reactor.F0.set(n=..., Xi=..., T=..., P=...)``; stand-alone default
+    Inlet state: set ``reactor.F0.n``, ``.Xi``, ``.T``, ``.P``; stand-alone default
     0.74 H2 / 0.25 N2 / 0.01 NH3 at 673.15 K and 200 bar.
 
     Properties: Q, xi (mol NH3/s), conversion (of H2), Exloss, Exeff, Sgen
@@ -394,7 +394,10 @@ class HB(ExtentReactor):
         self._init_state(legacy)
         if T is not None and 'F0_T' not in legacy:
             self.F0.T = T                       # stand-alone: feed at the reactor temperature, as before
-        self.F1.set(n=self.F0.n, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
+        self.F1.n = self.F0.n
+        self.F1.Xi = self.F0.Xi
+        self.F1.T = self.F0.T
+        self.F1.P = self.F0.P
 
     @property
     def r(self):
@@ -510,7 +513,10 @@ class HB_1D(ModelBase):
         self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
         self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
         self._init_state(legacy)
-        self.F1.set(n=self.F0.n, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
+        self.F1.n = self.F0.n
+        self.F1.Xi = self.F0.Xi
+        self.F1.T = self.F0.T
+        self.F1.P = self.F0.P
         self._nu = np.array([-1.5, -0.5, 1.0])
         self.profile = None
 
@@ -547,7 +553,10 @@ class HB_1D(ModelBase):
         self.Q_wall = float(sol.y[2, -1])
         xi_end, T_end = sol.y[0, -1], sol.y[1, -1]
         n, P = self._state(xi_end, T_end, self.Vol)
-        self.F1.set(n=float(n.sum()), Xi=n/n.sum(), T=float(T_end), P=float(P))
+        self.F1.n = float(n.sum())
+        self.F1.Xi = n/n.sum()
+        self.F1.T = float(T_end)
+        self.F1.P = float(P)
         rows = []
         for V, xi, T in zip(sol.t, sol.y[0], sol.y[1]):
             nV, PV = self._state(xi, T, V)
@@ -598,7 +607,7 @@ class MeOH(ExtentReactor):
         T, Q:   energy specification: T isothermal, Q heat added (Q=0 adiabatic), neither: inlet temperature
         dP:     pressure drop [bar]
 
-    Inlet state: ``reactor.F0.set(n=..., Xi=..., T=..., P=...)``; stand-alone default
+    Inlet state: set ``reactor.F0.n``, ``.Xi``, ``.T``, ``.P``; stand-alone default
     0.75 H2 / 0.05 CH4 / 0.1 CO2 / 0.1 CO at 473.15 K and 50 bar.
 
     Properties: Q, xi, conversion (H2, CO2, carbon), Exloss, Exeff, Sgen
@@ -631,7 +640,10 @@ class MeOH(ExtentReactor):
         self._init_state(legacy)
         if T is not None and 'F0_T' not in legacy:
             self.F0.T = T
-        self.F1.set(n=self.F0.n, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
+        self.F1.n = self.F0.n
+        self.F1.Xi = self.F0.Xi
+        self.F1.T = self.F0.T
+        self.F1.P = self.F0.P
 
     # ---- relations per model ----------------------------------------------------------------------
     def rate_residuals(self, xi, T, P, x):

@@ -103,8 +103,14 @@ class Flash(ModelBase):
         self.F1 = interfaces.Flange(name + '.F1', Medium=MediumV)
         self.F2 = interfaces.Flange(name + '.F2', Medium=MediumL)
         self._init_state(legacy)
-        self.F1.set(n=self.F0.n, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
-        self.F2.set(n=0.0, Xi=self.F0.Xi, T=self.F0.T, P=self.F0.P)
+        self.F1.n = self.F0.n
+        self.F1.Xi = self.F0.Xi
+        self.F1.T = self.F0.T
+        self.F1.P = self.F0.P
+        self.F2.n = 0.0
+        self.F2.Xi = self.F0.Xi
+        self.F2.T = self.F0.T
+        self.F2.P = self.F0.P
 
         self._eos = _PRModel.get(Medium.species, kij)
         self.beta = 1.0

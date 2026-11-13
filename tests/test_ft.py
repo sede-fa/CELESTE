@@ -129,7 +129,7 @@ def test_ft_units_run():
     m.run_sol()
     assert m.F2.n == 2 and m.mass_balance() == pytest.approx(0.0, abs=1e-9)
     heater = heatFT.Heater('ht', mediaFT.Naphtha(), mediaFT.Naphtha())
-    heater.F1.set(T=400.0)
+    heater.F1.T = 400.0
     heater.run_sol()
     assert heater.Q == pytest.approx(20.470005, rel=1e-6)
     chg = componentsFT.ChgMedium('chg')
@@ -243,7 +243,10 @@ def test_vapour_pressures():
 def test_raoult_flash(ft_effluent):
     med, sp, x = ft_effluent
     d = componentsFT.Flash('d', med, T=320.0, P=20.0)
-    d.F0.set(n=10.0, Xi=x, T=500.0, P=20.0)
+    d.F0.n = 10.0
+    d.F0.Xi = x
+    d.F0.T = 500.0
+    d.F0.P = 20.0
     d.run_sol()
     assert 0 < d.beta < 1 and d.water_liquid > 0
     assert d.mass_balance() == pytest.approx(0.0, abs=1e-9)
@@ -265,11 +268,17 @@ def test_raoult_flash(ft_effluent):
 def test_raoult_flash_above_the_dew_point_and_adiabatic(ft_effluent):
     med, sp, x = ft_effluent
     hot = componentsFT.Flash('h', med, T=700.0, P=2.0)
-    hot.F0.set(n=1.0, Xi=x, T=700.0, P=2.0)
+    hot.F0.n = 1.0
+    hot.F0.Xi = x
+    hot.F0.T = 700.0
+    hot.F0.P = 2.0
     hot.run_sol()
     assert hot.beta == 1.0 and hot.F2.n == 0.0
     adi = componentsFT.Flash('a', med, Q=0.0, P=5.0)
-    adi.F0.set(n=10.0, Xi=x, T=500.0, P=20.0)
+    adi.F0.n = 10.0
+    adi.F0.Xi = x
+    adi.F0.T = 500.0
+    adi.F0.P = 20.0
     assert adi.run_sol().success and adi.Q == pytest.approx(0.0, abs=1e-6)
     with pytest.raises(ValueError):
         componentsFT.Flash('x', med, T=300.0, Q=0.0)

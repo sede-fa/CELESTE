@@ -14,14 +14,15 @@ print(f'exergy {air.Ex:.4f} kJ/mol, entropy {air.s:.5f} kJ/mol/K\n')
 
 # --- compressor and cooler --------------------------------------------------------------------------
 comp = components.CompIsent('comp', media.Air(), eff=0.8)
-comp.F0.set(T=300.0, P=1.0)
-comp.F1.set(P=5.0)
+comp.F0.T = 300.0
+comp.F0.P = 1.0
+comp.F1.P = 5.0
 sol = comp.run_sol()
 print(f'compressor: converged={sol.success}, outlet {comp.F1.T:.1f} K, work {comp.W:.3f} kW, '
       f'exergy destroyed {comp.Exloss:.3f} kW')
 
 cooler = heat.Heater('cooler', media.Air(), media.Air())
-cooler.F1.set(T=310.0)
+cooler.F1.T = 310.0
 cooler.F0.Medium.PTX = comp.F1.Medium.PTX          # hand the stream over (systems do this with connect_seq)
 cooler.run_sol()
 print(f'cooler: duty {cooler.Q:.3f} kW\n')
@@ -37,8 +38,8 @@ print(f'mass balance error {reactor.mass_balance():.2e} g/s')
 
 # --- mixing -------------------------------------------------------------------------------------------
 mixer = flow.Mixer('mix', media.Air())
-mixer.F0.set(n=1.0)
-mixer.F1.set(n=2.0)
+mixer.F0.n = 1.0
+mixer.F1.n = 2.0
 mixer.F0.T, mixer.F1.T = 300.0, 600.0
 mixer.run_sol()
 print(f'\nmixer outlet {mixer.F2.T:.2f} K, entropy generated {mixer.Sgen*1e3:.3f} W/K')

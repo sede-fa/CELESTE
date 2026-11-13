@@ -499,7 +499,10 @@ class Flash(ModelBase):
 
     Example:
         drum = componentsFT.Flash('drum', mediaFT.Syncrude(), T=310.0, P=20.0)
-        drum.F0.set(n=10.0, Xi=x_syncrude, T=500.0, P=20.0)
+        drum.F0.n = 10.0
+        drum.F0.Xi = x_syncrude
+        drum.F0.T = 500.0
+        drum.F0.P = 20.0
         drum.run_sol()
     """
 

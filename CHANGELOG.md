@@ -25,7 +25,7 @@ version may notice.
   former `HB_Adiabatic`); **`HB_1D`** – plug-flow bed integrated along its volume (profiles in `.profile`)
 - **`CSL.reactors.MeOH`** – one methanol reactor: `model='equilibrium' | 'yield' | 'kinetic'`, isothermal,
   adiabatic or with a given duty (replaces `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic`, `MeOH_WGS`)
-- `Flange.set(n=, Xi=, T=, P=)`; `Flange.compatible(other)` and `Flange.incompatibility(other)` (the reason as
+- `Flange.compatible(other)` and `Flange.incompatibility(other)` (the reason as
   text)
 - **`celeste.HEN.HENSynthesiser`** – heat exchanger network synthesis from the pinch stream table
   (`solve(objective='cost' | 'mer' | 'min_units')`, default MILP time limit 600 s)
@@ -43,6 +43,7 @@ version may notice.
 - `CSL.components.ChgMedium` (moved from the FT module, which now extends it)
 - `CSL.equilibrium` – equilibrium constants shared by reactors and the SOC, computed from the NASA Gibbs
   energies (`K_eq(T, reaction)`; `K_WGS`, `K_rWGS`, `K_MSR`, `K_PSR`, `K_NH3`, `K_MeOH_CO2`, `K_MeOH_CO`)
+- `jx.units.Stream.replace(n=, T=, P=, x=)`: a copy with a changed state (streams are immutable)
 - `ModelBase.inlets`, `outlets`, `mass_balance()` and a default `MBcheck()`; `energy_balance()`, `heat_and_work()`
 - `SysBase.boundary_flanges()`, `unit_balances()`
 - `IntrospectionMixin.get_Electric()` (was called by the reports but did not exist)
@@ -88,6 +89,9 @@ version may notice.
 
 ### Fixed
 
+- `SOC`: `Qloss` follows the sign convention of `Q` and `W` (positive into the stack, a loss is negative) and
+  now enters the entropy generation (heat exchanged at T0). Before, it was described as a loss but entered the
+  energy balance as a heat input, and `Sgen` ignored it. Results with the default `Qloss = 0` are unchanged.
 - `Mixer`: two inlets within 0.001 % in temperature were treated as equal, so the outlet temperature jumped by up
   to a few mK; this stalled recycle solvers near convergence.
 - A medium created with its own species list (`media.Fuel_CH4(species=[...], Xi=...)`) was reset to the
@@ -161,7 +165,7 @@ These keep working and emit a `CelesteDeprecationWarning`:
 | `HB_Adiabatic(...)` | `HB(..., Q=0)`; outlet pressure `F1_P` → pressure drop `dP` |
 | `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic` | `MeOH(..., model='equilibrium' / 'yield' / 'kinetic', T=...)` |
 | `MeOH_WGS` | `MeOH(..., model='yield', Q=0)` |
-| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P`; `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash`, `Valve`, `Pump` (also their `n`, `Xi`), CSL `GPU_*` | set the state on the flanges: `unit.F0.set(n=..., Xi=..., T=..., P=...)`, `heater.F1.set(T=...)`, `comp.F1.set(P=...)` |
+| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P`; `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash`, `Valve`, `Pump` (also their `n`, `Xi`), CSL `GPU_*` | set the state on the flanges: `unit.F0.n = ...`, `heater.F1.T = ...`, `comp.F1.P = ...` |
 | `Recycle_FPI`, `Recycle_Wegstein_q`, `Recycle_Wegstein_Generic`, `Recycle_Wegstein_Generic2`, `Recycle_Steffensen`, `Recycle_Aitken`, `Recycle_Hybrid_FPI_Aitken`, `recycle_solver` | `Recycle_Tear(..., method='direct' / 'wegstein' / 'aitken')`; the wrappers converge the full tear stream, so they may take a different number of passes |
 | `Thermo.updateBoolArr()`, `thermoArr()`, `getCoeffs()` | nothing – handled inside `calcThermoSep()` |
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |

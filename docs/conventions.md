@@ -97,8 +97,10 @@ system:
 
 ```python
 comp = components.CompIsent('comp', media.Air(), eff=0.8)   # design
-comp.F0.set(n=10.0, T=300.0, P=1.0)                        # feed
-comp.F1.set(P=5.0)                                         # operating spec: discharge pressure
+comp.F0.n = 10.0  # feed
+comp.F0.T = 300.0
+comp.F0.P = 1.0
+comp.F1.P = 5.0  # operating spec: discharge pressure
 comp.run_sol()
 ```
 

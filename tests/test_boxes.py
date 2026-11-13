@@ -99,7 +99,10 @@ class FEHELoop(SysBase):
         self.connect_seq(self.hx.H1, self.product.F0, store=store)
 
     def run_sol(self, T_guess=800.0, **kw):
-        self.hx.H0.set(n=1.0, Xi=[0.74, 0.25, 0.01], T=T_guess, P=200.0)
+        self.hx.H0.n = 1.0
+        self.hx.H0.Xi = [0.74, 0.25, 0.01]
+        self.hx.H0.T = T_guess
+        self.hx.H0.P = 200.0
         return self.Recycle_Tear(self.reactor.F1, self.hx.H0, **kw)
 
 
