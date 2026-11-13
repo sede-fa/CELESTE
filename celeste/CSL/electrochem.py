@@ -76,7 +76,6 @@ class SOC(ModelBase):
         self.F1 = interfaces.Flange(name + '.F1', Medium=MediumF, T=T or T_in, P=P_in)
         self.A0 = interfaces.Flange(name + '.A0', Medium=MediumA, T=T_in, P=P_in)
         self.A1 = interfaces.Flange(name + '.A1', Medium=MediumA, T=T or T_in, P=P_in)
-        self._V_mean = self._ASR_mean = np.nan
         if Q is None:
             self.T = T
         else:
@@ -136,15 +135,16 @@ class SOC(ModelBase):
         dG = dG0 + _nasa.R*T*(np.log(x_H2O) - np.log(x_H2) - 0.5*np.log(x_O2*P))
         return -dG*1e3/(2*F_CONST)
 
-    def update_voltage(self):
+    @property
+    def V_mean(self):
         '''
-        'mean' voltage: the Nernst potential and the ASR averaged over the charge passed (Gauss-Legendre
-        in lam = fraction of the charge), with the fuel at equilibrium and T linear in lam from F0.T to F1.T.
+        Nernst potential averaged over the charge passed [V] (Gauss-Legendre in lam, the fraction of the
+        charge), with the fuel at equilibrium and T linear in lam from F0.T to F1.T.
         '''
-        if self.V_model != 'mean' or self.n_O == 0:
-            return
+        if self.n_O == 0:
+            return np.nan
         nodes, weights = np.polynomial.legendre.leggauss(int(self.n_nodes))
-        E = ASR = 0.0
+        E = 0.0
         ln_n = np.log(np.maximum(self.F0.n*np.asarray(self.F0.Xi), 1e-12*self.F0.n))
         for lam, w in zip(0.5*(nodes + 1), 0.5*weights):
             T = self.F0.T + lam*(self.F1.T - self.F0.T)
@@ -152,13 +152,7 @@ class SOC(ModelBase):
             n = np.exp(ln_n)
             n_O2, n_air = self.air_O2(lam)
             E += w*self.nernst(T, self.F0.P, n[0]/n.sum(), n[4]/n.sum(), n_O2/n_air)
-            ASR += w*self.ASR(T)
-        self._V_mean, self._ASR_mean = float(E), float(ASR)
-
-    @property
-    def V_mean(self):
-        '''Nernst potential averaged over the charge passed [V].'''
-        return self._V_mean
+        return float(E)
 
     @property
     def V_nernst_out(self):
@@ -187,13 +181,18 @@ class SOC(ModelBase):
         return 7.28e2*np.exp(-8.29e-3*(T - 273.15))
 
     @property
+    def ASR_mean(self):
+        '''ASR averaged over the charge passed [Ohm cm2]: T is linear in the charge, so the average is analytic.'''
+        b, dT = 8.29e-3, self.F1.T - self.F0.T
+        return self.ASR(self.F0.T)*(1 - np.exp(-b*dT))/(b*dT) if abs(dT) > 1e-9 else self.ASR(self.F0.T)
+
+    @property
     def j(self):
         return self.I/self.cellArea
 
     @property
     def Vop(self):
-        ASR = self._ASR_mean if self.V_model == 'mean' else self.ASR()
-        return self.Vid - self.f_ASR*ASR*self.j
+        return self.Vid - self.f_ASR*self.ASR_mean*self.j
 
     @property
     def W(self):
@@ -292,7 +291,6 @@ class SOC(ModelBase):
     def f_sol_Q(self, x):
         '''Specified heat duty: x = (ln of the fuel outlet flows, outlet temperature).'''
         self.set_outlets(np.exp(x[:6]), x[6])
-        self.update_voltage()                    # the voltage depends on the outlet temperature
         return self.Eqs_Q()
 
     def run_sol(self, x0=None):
@@ -302,7 +300,6 @@ class SOC(ModelBase):
             x0 = np.append(ln_feed, self.F0.T)[:self.n_unknowns]
         sol = solvers.solve(self.f_sol, x0, tol=1e-9, name=self.name)
         self.f_sol(sol.x)
-        self.update_voltage()
         return sol
 
 

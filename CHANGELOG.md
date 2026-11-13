@@ -94,8 +94,8 @@ version may notice.
   `main` (`docs/conventions.md`).
 - `SOC` takes design inputs like the other units: the inlet state is set on `F0`/`A0`, the outlet temperature
   is `T=`. `f_sol` takes the logarithms of the outlet flows (was outlet fractions and flow) and dispatches to `f_sol_T` / `f_sol_Q`; `MSR_extent` is
-  replaced by `xi_MSR`. The area-specific resistance of the default `V_model='mean'` is averaged along the cell (unchanged for
-  an isothermal stack).
+  replaced by `xi_MSR`. The ohmic loss uses the area-specific resistance averaged along the cell (unchanged for an isothermal
+  stack).
 
 ### Fixed
 

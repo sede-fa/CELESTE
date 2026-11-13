@@ -60,8 +60,9 @@ the stack uses:
 
 All three are available as `V_mean`, `V_nernst_out` and `V_streams`
 (`V_nernst_in` gives the inlet value). `Vop = Vid − f_ASR·ASR·j`, with the
-area-specific resistance averaged along the cell in the same way for `'mean'`
-and taken at the outlet otherwise.
+area-specific resistance averaged along the cell (`ASR_mean`; T is linear in
+the charge, so the average is analytic). The voltages are properties, computed
+when read.
 
 **The Gibbs-energy approach when the temperature changes.** For an isothermal
 stack fed with an equilibrium mixture, `V_mean` equals `V_streams` (the tests

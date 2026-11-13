@@ -245,7 +245,7 @@ def test_soc_voltage_models():
     assert eq_soc.V_mean == pytest.approx(eq_soc.V_streams, abs=1e-9)
     out = _co_electrolysis(V_model='outlet')
     out.run_sol()
-    assert out.Vid == out.V_nernst_out and np.isnan(out.V_mean)
+    assert out.Vid == out.V_nernst_out and out.V_mean == pytest.approx(soc.V_mean)
     assert out.Vop == pytest.approx(out.Vid - out.ASR()*out.j)
     streams = _co_electrolysis(V_model='streams')
     streams.run_sol()
