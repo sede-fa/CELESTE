@@ -207,3 +207,33 @@ def test_soc_heat_loss_follows_the_sign_convention():
     assert lossy.EBcheck() == pytest.approx(0.0, abs=1e-9)
     # the loss leaves at T0: no exergy with it, so it shows up as destruction and as entropy generation
     assert lossy.soc.Exloss - 298.15*lossy.soc.Sgen == pytest.approx(ref.soc.Exloss - 298.15*ref.soc.Sgen, abs=1e-9)
+
+
+def test_compression_train_with_other_compressors_and_pressure_ratio():
+    from celeste.CSL import turbomachinery
+    iso = ComponentModels.Ncomp('t', media.Air(), n=2.0, N_stage=3, P_out=8.0, eff_comp=0.8, T_HT=320.0)
+    iso.run_sol()
+    assert [c.F1.P for c in iso.compressors] == pytest.approx([2.0, 4.0, 8.0]) and iso.F1.P == pytest.approx(8.0)
+    assert iso.F1.T == 320.0 and all(h.F1.T == 320.0 for h in iso.heaters)
+    poly = ComponentModels.Ncomp('t', media.Air(), n=2.0, N_stage=3, P_out=8.0, eff_comp=0.8, T_HT=320.0,
+                                 compressor=turbomachinery.CompPolytropic)
+    poly.run_sol()
+    assert all(isinstance(c, turbomachinery.CompPolytropic) for c in poly.compressors)
+    assert poly.tot_work_comp() > iso.tot_work_comp()                       # polytropic < isentropic efficiency for the same value
+    mixed = ComponentModels.Ncomp('t', media.Air(), N_stage=2, P_comp=[2.0, 4.0], eff_comp=[0.8, 0.7],
+                                  compressor=[turbomachinery.CompIsent, turbomachinery.CompIsot])
+    mixed.run_sol()
+    assert isinstance(mixed.comp2, turbomachinery.CompIsot) and mixed.comp2.eff == 0.7
+    mapped = ComponentModels.Ncomp('t', media.Air(), N_stage=2, P_comp=[2.0, 4.0], eff_comp=0.8,
+                                   compressor=lambda name, Medium, eff: turbomachinery.CompressorMapped(
+                                       name, None, Medium, PR=2.0, eta=eff, use_map=False))
+    mapped.run_sol()
+    assert mapped.F1.P == pytest.approx(4.0)
+    mixed.add_stage(0.75, 8.0, 330.0, turbomachinery.CompPolytropic)
+    mixed.run_sol()
+    assert mixed.N == 3 and mixed.F1.T == 330.0
+    cs = ComponentModels.SimpleCompressorSys('s', 1.0, None, 300.0, 1.0, 5.0, eff=0.8, compressor=turbomachinery.CompPolytropic)
+    cs.run_sol()
+    ref = ComponentModels.SimpleCompressorSys('s', 1.0, None, 300.0, 1.0, 5.0, eff=0.8)
+    ref.run_sol()
+    assert cs.compressor.F1.T > ref.compressor.F1.T

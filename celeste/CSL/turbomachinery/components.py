@@ -172,26 +172,26 @@ class _MappedMixin:
    
 class _RealGasPath:
     """
-    Real-gas compression or expansion from the inlet F0 to the outlet pressure F1.P in ``stages`` steps.
+    Real-gas compression or expansion from the inlet F0 to the outlet pressure F1.P in ``n_steps`` steps.
 
     Each step is an isentropic change followed by the efficiency correction of its enthalpy change,
     ``h1 = h0 + dh_s/eta`` for compression and ``h1 = h0 + dh_s*eta`` for expansion. One step with ``eta`` the
     isentropic efficiency gives the isentropic model, many steps with ``eta`` the polytropic efficiency converge
     to the polytropic model.
     """
-    _stages = 1
+    _n_steps = 1
 
-    def _path(self, eta, stages=None):
+    def _path(self, eta, n_steps=None):
         F0, F1 = self.F0, self.F1
         F1.n, F1.Xi = F0.n, F0.Xi
         if '_iso' not in self.__dict__:                       # internal state flange, kept out of the unit's ports
             self.__dict__['_iso'] = [interfaces.Flange(self.name + '.iso', Medium=F0.Medium)]
         iso = self.__dict__['_iso'][0]
-        stages = stages or self._stages
+        n_steps = n_steps or self._n_steps
         compress = F1.P > F0.P
         eta_h = eta if compress else 1/eta
         iso.Xi, iso.P, iso.T = F0.Xi, F0.P, F0.T
-        for P in np.geomspace(F0.P, F1.P, stages + 1)[1:]:
+        for P in np.geomspace(F0.P, F1.P, n_steps + 1)[1:]:
             h0, s0 = iso.h, iso.s
             iso.T_sPX(s0, P, F0.Xi)
             iso.T_hx(h0 + (iso.h - h0)/eta_h, F0.Xi)
@@ -263,16 +263,16 @@ class CompPolytropic(CompIsent):
     For an ideal-gas medium (the NASA media) the polytropic path has a closed form for any cp(T): from
     ``dh = v dP/eff`` and ``T ds = dh - v dP`` follows ``ds = (1/eff - 1) R dP/P``, so the outlet entropy is
     ``s1 = s0 + (1/eff - 1) R ln(P1/P0)`` and one temperature solve gives the outlet. Other media (equation of
-    state, CoolProp) integrate the path in ``stages`` isentropic steps instead (error ~ 1/stages).
+    state, CoolProp) integrate the path in ``n_steps`` isentropic steps instead (error ~ 1/n_steps).
     """
-    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1.0, stages:int=50, **legacy):
+    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1.0, n_steps:int=50, **legacy):
         super().__init__(name, Medium=Medium, eff=eff, **legacy)
-        self._stages = stages
+        self._n_steps = n_steps
 
     def Eqs(self):
         F0, F1 = self.F0, self.F1
         if not isinstance(F0.Medium, media.Medium_NASAbase):
-            return self._path(self.eff, self._stages)
+            return self._path(self.eff, self._n_steps)
         F1.n, F1.Xi = F0.n, F0.Xi
         eff = self.eff if F1.P > F0.P else 1/self.eff
         F1.T = F0.T

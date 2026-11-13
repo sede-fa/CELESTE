@@ -350,11 +350,11 @@ def test_polytropic_compressor_closed_form_matches_the_staged_path():
     assert c.run_sol().success
     assert c.F1.T > isentropic.F1.T                                  # polytropic: reheat of the staged compression
     T = []
-    for stages in (10, 100, 800):
-        c._path(0.8, stages)
+    for n_steps in (10, 100, 800):
+        c._path(0.8, n_steps)
         T.append(c.F1.T)
     c.run_sol()
-    assert T[0] < T[1] < T[2] < c.F1.T and c.F1.T - T[2] < 0.05      # the stage integration converges to it as 1/stages
+    assert T[0] < T[1] < T[2] < c.F1.T and c.F1.T - T[2] < 0.05      # the stage integration converges to it as 1/n_steps
     t = CompPolytropic('t', media.Air(), eff=0.85)                     # expansion
     t.F0.T, t.F0.P, t.F1.P = 900.0, 8.0, 1.0
     t.run_sol()

@@ -60,7 +60,10 @@ version may notice.
   live here (`Compressor`, `CompIsot`, `CompIsent`, `CompressorMapped`, `Turbine`, `TurbineMapped`); one
   real-gas path (`_RealGasPath`) serves the isentropic compressor, the polytropic compressor and the mapped
   compressors and turbines. **`CompPolytropic`**: polytropic efficiency; closed form for ideal-gas (NASA) media, any cp(T): the outlet
-  entropy is s0 + (1/eff − 1)·R·ln(P1/P0); other media integrate in `stages` isentropic steps
+  entropy is s0 + (1/eff − 1)·R·ln(P1/P0); other media integrate in `n_steps` isentropic steps
+- **`ComponentModels.Ncomp`** (and `SimpleCompressorSys`) take the compressor model as `compressor=` (a class or any
+  callable `(name, Medium, eff)`, one for all stages or a list per stage), one value or a list for `eff_comp` and `T_HT`, a
+  final pressure `P_out` (equal pressure ratios) instead of `P_comp`, and `add_stage(..., compressor=)`
 - Transport properties (from main): `mu`, `k`, `Pr` of the media (Chung viscosity, Eucken conductivity, Wilke and
   Mason–Saxena mixing; CoolProp for `*_CP`) and of the flanges, `Flange.rho`; vectorised in NumPy (no Numba)
 - `media.Fluegas`, `FluegasIncomplete`, `AirHumid` (from main)
