@@ -232,3 +232,10 @@ is no version number in the source tree. Between releases the version is
 1. Move the *Unreleased* section of `CHANGELOG.md` under the new version number.
 2. Tag the merge commit on `main`: `git tag -a v0.1.0 -m "CELESTE 0.1.0"` and push the tag.
 3. `python -m build` produces the wheel and sdist with that version.
+
+## Type checking
+
+The code carries no type annotations (they cost readability, and the models set their flanges and parameters
+dynamically). `pyproject.toml` configures pyright to check what does not need them: undefined names, unreachable
+code, syntax. New code follows the same rule: write plain, readable signatures and docstrings, and do not add
+annotations or `# type:` comments to silence the checker; adjust `[tool.pyright]` instead if a whole category is noise.

@@ -58,3 +58,25 @@ filterwarnings = [
 [tool.hatch.metadata]
 allow-direct-references=true
 
+
+# Type checking without annotations: the models assign their flanges and parameters dynamically, so the
+# checks that need declared attributes (and the numpy / pandas overload checks) are off. Undefined names,
+# unused coroutines, bad syntax and the like stay on.
+[tool.pyright]
+include = ["celeste"]
+reportAttributeAccessIssue = false
+reportOptionalMemberAccess = false
+reportOptionalSubscript = false
+reportOptionalOperand = false
+reportIncompatibleMethodOverride = false
+reportIncompatibleVariableOverride = false
+reportArgumentType = false
+reportOperatorIssue = false
+reportAssignmentType = false
+reportUnsupportedDunderAll = false
+reportMissingImports = false
+reportCallIssue = false
+reportReturnType = false
+reportFunctionMemberAccess = false
+reportInvalidTypeForm = false
+reportPossiblyUnbound = false
