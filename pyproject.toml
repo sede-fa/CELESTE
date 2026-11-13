@@ -79,4 +79,4 @@ reportCallIssue = false
 reportReturnType = false
 reportFunctionMemberAccess = false
 reportInvalidTypeForm = false
-reportPossiblyUnbound = false
+reportPossiblyUnboundVariable = false
