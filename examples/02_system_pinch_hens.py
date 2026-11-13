@@ -7,6 +7,8 @@ synthesis proposes the heat exchangers.
 
 Run with:  python examples/02_system_pinch_hens.py
 """
+from pathlib import Path
+
 import matplotlib
 matplotlib.use('Agg')
 
@@ -14,6 +16,9 @@ import pandas as pd
 
 from celeste.CSL.systems.ProcessBoxes import MethanolLoop
 from celeste.HEN import HENSynthesiser, PinchAnalyser
+
+FIG_DIR = Path(__file__).parent / 'figures'
+FIG_DIR.mkdir(exist_ok=True)
 
 pd.set_option('display.width', 200)
 
@@ -32,7 +37,7 @@ print(streams.round(3), '\n')
 pinch = PinchAnalyser(streams, dt_min=10).solve()
 print(pinch.summary(), '\n')
 fig, _ = pinch.plot_summary()
-fig.savefig('pinch.png', dpi=120)
+fig.savefig(FIG_DIR / 'pinch.png', dpi=120)
 
 # --- 3. heat exchanger network ------------------------------------------------------------------------
 hen = HENSynthesiser(streams, dt_min=10).solve()
@@ -41,5 +46,5 @@ print('process-process exchangers\n', hen.network.round(2), '\n')
 print('utility exchangers\n', hen.utilities.round(2), '\n')
 print(hen.check())
 fig, _ = hen.plot_grid_diagram()
-fig.savefig('network.png', dpi=120)
-print('\nfigures written: pinch.png, network.png')
+fig.savefig(FIG_DIR / 'network.png', dpi=120)
+print(f'\nfigures written to {FIG_DIR}')

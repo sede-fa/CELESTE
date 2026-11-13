@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./Data/CELESTE logo FINAL.svg" alt="CELESTE logo" width="500">
+  <img src="./misc/CELESTE logo FINAL.svg" alt="CELESTE logo" width="500">
 </p>
 
 # CELESTE
