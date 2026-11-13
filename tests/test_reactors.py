@@ -186,12 +186,13 @@ def test_solid_oxide_cell():
     assert soc.F1.Xi[0] == pytest.approx(0.1259, abs=1e-4) and soc.Vop == pytest.approx(1.3256, abs=1e-4)
     assert soc.W == pytest.approx(6.628, abs=1e-3)
     assert soc.mass_balance() == pytest.approx(0.0, abs=1e-8)
-    assert soc.F0.n*np.dot(soc.F0.Xi, soc._N_H) == pytest.approx(soc.F1.n*np.dot(soc.F1.Xi, soc._N_H), rel=1e-8)
+    H = soc.ELEMENTS[1]
+    assert soc.F0.n*np.dot(soc.F0.Xi, H) == pytest.approx(soc.F1.n*np.dot(soc.F1.Xi, H), rel=1e-8)
     assert soc.Exloss > 0 and soc.j == -0.5 and 0 < soc.RC < 1
     # former keywords still work, with a deprecation warning
     with pytest.warns(DeprecationWarning, match='outlet temperature as T='):
         alt = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), T_soc0=1000.0, T_soc1=1050.0, P_soc=3.0, I=-10.0, Ncells=10)
-    assert (alt.F0.T, alt.F1.T, alt.F0.P, alt.A1.P) == (1000.0, 1050.0, 3.0, 3.0) and alt.Tsoc0 == 1000.0
+    assert (alt.F0.T, alt.F1.T, alt.F0.P, alt.A1.P) == (1000.0, 1050.0, 3.0, 3.0)
     assert alt.T == 1050.0 and alt.isothermal
     with pytest.warns(DeprecationWarning):
         electrochem.SOC('s', media.Fuel_CH4(), media.Air(), extent=True)
@@ -213,12 +214,15 @@ def _co_electrolysis(**kw):
 def test_soc_extents_close_the_balances_and_reach_equilibrium():
     soc = _co_electrolysis()
     assert soc.run_sol().success
-    xi = soc.xi
-    assert xi[0] == pytest.approx(soc.n_O) and soc.n_O < 0
+    assert soc.n_O < 0
     n0, n1 = soc.F0.n*soc.F0.Xi, soc.F1.n*soc.F1.Xi
-    for N in (soc._N_C, soc._N_H, soc._N_N):
-        assert np.dot(n0, N) == pytest.approx(np.dot(n1, N), rel=1e-10)
-    assert np.dot(n0, soc._N_O) + soc.n_O == pytest.approx(np.dot(n1, soc._N_O), rel=1e-10)
+    C, H, O, N = soc.ELEMENTS
+    for E in (C, H, N):
+        assert np.dot(n0, E) == pytest.approx(np.dot(n1, E), rel=1e-9)
+    assert np.dot(n0, O) + soc.n_O == pytest.approx(np.dot(n1, O), rel=1e-9)
+    # the extents follow from the flows: CO2 formed by the shift, CH4 converted by reforming
+    nu = np.array([[-1, 0, 0, 0, 1, 0], [1, 0, 1, -1, -1, 0], [3, -1, 0, 1, -1, 0]])
+    assert n1 == pytest.approx(n0 + np.array([soc.n_O, soc.xi_WGS, soc.xi_MSR]) @ nu, rel=1e-8, abs=1e-12)
     assert soc.mass_balance() == pytest.approx(0.0, abs=1e-10)
     x = dict(zip(soc.F1.Medium.species, soc.F1.Xi))
     assert x['CO2']*x['H2']/(x['CO']*x['H2O']) == pytest.approx(soc.K_WGS(), rel=1e-8)

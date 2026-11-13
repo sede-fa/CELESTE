@@ -3,33 +3,25 @@
 ## Model
 
 The fuel side holds H2, CH4, CO2, CO, H2O and N2 and leaves at water-gas-shift
-and methane-reforming equilibrium. Its outlet follows from three extents:
-
-    n_out = n_in + ξ_EC·ν_EC + ξ_WGS·ν_WGS + ξ_MSR·ν_MSR
-
-| Reaction | Stoichiometry | Extent |
-|---|---|---|
-| electrochemical (fuel side) | H2 + O²⁻ → H2O + 2e⁻ | ξ_EC = Ncells·I/(2F), fixed by the current |
-| water-gas shift | CO + H2O ⇌ CO2 + H2 | unknown |
-| methane reforming | CH4 + H2O ⇌ CO + 3 H2 | unknown |
-
-The element balances therefore hold by construction. The system of equations
-(`Eqs`) is
+(CO + H2O ⇌ CO2 + H2) and methane-reforming (CH4 + H2O ⇌ CO + 3 H2)
+equilibrium. The current fixes the oxygen exchanged with the air side,
+n_O = Ncells·I/(2F) (negative in electrolysis). The system of equations (`Eqs`):
 
 | Unknown | Equation |
 |---|---|
-| ξ_WGS | WGS equilibrium, ln(x_CO2·x_H2 / (x_CO·x_H2O)) − ln K_WGS = 0 |
-| ξ_MSR | MSR equilibrium, ln(x_CO·x_H2³·P² / (x_CH4·x_H2O)) − ln K_MSR = 0 |
-| T_out (only with `Q=`) | energy balance, Q(T_out) − Q_spec = 0 |
+| ln n_H2, ln n_CH4, ln n_CO2, ln n_CO, ln n_H2O, ln n_N2 (fuel outlet) | C, H, N balances; O balance including n_O |
+| | WGS equilibrium, ln(x_CO2·x_H2 / (x_CO·x_H2O)) − ln K_WGS = 0 |
+| | MSR equilibrium, ln(x_CO·x_H2³·P² / (x_CH4·x_H2O)) − ln K_MSR = 0 |
+| T_out (only with `Q=`) | energy balance, Q − Q_spec = 0 |
 
-with the constants from the NASA Gibbs energies (`CSL.equilibrium`).
-`run_sol` solves the two equilibria for an isothermal stack; with a heat duty it
-solves the energy balance for T_out with the extents at equilibrium at each trial
-temperature. The equilibrium at a given temperature (`local_equilibrium`) uses
-Newton's method with the analytical Jacobian, because the trace species of a
-typical feed (1e-8 CH4) make the residuals too steep for a generic solver. The air side loses ½·ξ_EC of O2. With the
-CO2/CO couple instead of H2/H2O as the electrochemical reaction the outlet would
-be the same, because the shift reaction is at equilibrium.
+The balances are scaled by the element inflow and the equilibria are in log
+form, so all residuals are of order one. Solving for the logarithms of the flows
+keeps them positive, also for trace species (1e-8 CH4 in an electrolysis feed),
+so `celeste.solvers.solve` needs no bounds. `run_sol` solves `f_sol_T`
+(isothermal, 6 unknowns) or `f_sol_Q` (heat duty, 7 unknowns, outlet
+temperature solved together with the compositions). The constants come from the
+NASA Gibbs energies (`CSL.equilibrium`). The extents are reported from the
+flows: `xi_WGS` is the CO2 formed, `xi_MSR` the CH4 converted.
 
 ## Energy specification
 

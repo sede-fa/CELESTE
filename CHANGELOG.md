@@ -40,11 +40,13 @@ version may notice.
   `celeste.FT`.
 - `Flange.Ex_ph`, `Flange.Ex_ch` (physical / chemical exergy), `Flange.EX` (exergy flow, kW);
   `ThermoExergy.Ex_ph`, `Ex_ch`, `condenses`
-- **`CSL.electrochem.SOC`** solved for the shift and reforming extents (the electrochemical extent is fixed by
-  the current), so the element balances close by construction; energy specification `T=` (isothermal) or `Q=`
-  (`Q=0` adiabatic, outlet temperature solved); ideal voltage `V_model='mean'` (charge-averaged Nernst
-  potential, default), `'outlet'` (Nernst potential at the outlet) or `'streams'` (former model), all three
-  available as `V_mean`, `V_nernst_out`, `V_streams`. See `docs/electrochemistry.md`
+- **`CSL.electrochem.SOC`**: unknowns are the logarithms of the fuel outlet flows (positive also for trace
+  species, no bounds needed); equations are the C, H, O, N balances and the shift and reforming equilibria, plus
+  the energy balance for a specified heat duty. Energy specification `T=` (isothermal, `f_sol_T`) or `Q=`
+  (`Q=0` adiabatic, `f_sol_Q`: outlet temperature solved together with the composition). Ideal voltage
+  `V_model='mean'` (charge-averaged Nernst potential, default), `'outlet'` or `'streams'` (former model), all
+  three available as `V_mean`, `V_nernst_out`, `V_streams`; extents `xi_WGS`, `xi_MSR` from the flows. See
+  `docs/electrochemistry.md`
 - `CSL.components.ChgMedium` (moved from the FT module, which now extends it)
 - `CSL.equilibrium` – equilibrium constants shared by reactors and the SOC, computed from the NASA Gibbs
   energies (`K_eq(T, reaction)`; `K_WGS`, `K_rWGS`, `K_MSR`, `K_PSR`, `K_NH3`, `K_MeOH_CO2`, `K_MeOH_CO`)
@@ -91,7 +93,8 @@ version may notice.
 - Removed `.gitattributes` (it referred to `CELESTE2/_version.py`, which does not exist); releases are tags on
   `main` (`docs/conventions.md`).
 - `SOC` takes design inputs like the other units: the inlet state is set on `F0`/`A0`, the outlet temperature
-  is `T=`. The area-specific resistance of the default `V_model='mean'` is averaged along the cell (unchanged for
+  is `T=`. `f_sol` takes the logarithms of the outlet flows (was outlet fractions and flow) and dispatches to `f_sol_T` / `f_sol_Q`; `MSR_extent` is
+  replaced by `xi_MSR`. The area-specific resistance of the default `V_model='mean'` is averaged along the cell (unchanged for
   an isothermal stack).
 
 ### Fixed
@@ -161,7 +164,7 @@ version may notice.
 | `HB` (isothermal) | Nielsen constants of the original `HB`, outlet at the inlet temperature | constants of `HB_Adiabatic` (one rate law); isothermal at `T` | test case NH3 0.3658 → 0.3677 |
 | Isothermal methanol reactors | outlet at the inlet temperature (constructor `T` set both) | at the specified `T` | only when the feed temperature differs from `T` in a system |
 | Reactor and SOC results | – | same roots, solver tolerance tighter | relative 1e-6 or smaller |
-| `SOC.Vid` | Gibbs energy difference of the streams (with `extent=True` minus a reforming term that is zero at equilibrium) | charge-averaged Nernst potential (`V_model='mean'`); the former value is `V_streams` / `V_model='streams'` | identical for an isothermal stack fed at equilibrium. Feed not at equilibrium: its relaxation is no longer counted as work, e.g. `SOECSys` 1.2212779 → 1.2212782 V, `SOCsysRecupe` 1.397895 → 1.397950 V, co-electrolysis test feed 0.8325 → 0.8402 V. With a temperature change the former value was not a voltage |
+| `SOC.Vid` | Gibbs energy difference of the streams (with `extent=True` minus a reforming term that is zero at equilibrium) | charge-averaged Nernst potential (`V_model='mean'`); the former value is `V_streams` / `V_model='streams'` | identical for an isothermal stack fed at equilibrium. Feed not at equilibrium: its relaxation is no longer counted as work, e.g. `SOECSys` 1.2212779 → 1.2212782 V, `SOCsysRecupe` 1.397895 → 1.397950 V, co-electrolysis test feed 0.8325 → 0.8402 V, fuel cell fed with 25 % CH4 (internal reforming) by 0.43 V, because the reforming of the feed towards equilibrium was counted as electrical work. With a temperature change the former value was not a voltage |
 
 The reference values of the original implementation are stored in
 `tests/data/golden_thermo.json`; `tests/test_thermo.py` and

@@ -8,9 +8,7 @@ from .exergy import T0
 from functools import lru_cache
 from ..jx import nasa as _nasa
 from .. import solvers
-import warnings
 import numpy as np
-import scipy.optimize as spo
 from celeste import functions as funs
 
 F_CONST = 96485  #: Faraday constant used by the electrochemical models, C/mol
@@ -27,103 +25,58 @@ def _lnK(reaction: str, T: float) -> float:
 
 class SOC(ModelBase):
     r'''
-    Solid oxide cell stack (electrolysis for I < 0, fuel cell for I > 0) with the fuel side at
+    Solid oxide cell stack (electrolysis for I < 0, fuel cell for I > 0); the fuel side leaves at
     water-gas-shift and methane-reforming equilibrium.
 
-    Unknowns:   the extents xi_WGS and xi_MSR [mol/s] (and the outlet temperature when Q is specified)
-    Equations:  WGS equilibrium, MSR equilibrium (and the energy balance when Q is specified)
-
-    The fuel outlet follows from three extents,
-
-        n_out = n_in + n_O*nu_EC + xi_WGS*nu_WGS + xi_MSR*nu_MSR
-
-    where the electrochemical extent n_O = Ncells*I/(2F) (H2 + O -> H2O on the fuel side) is fixed by
-    the current, so the element balances hold by construction.
+    System of equations (``Eqs``):
+        unknowns:  ln of the fuel outlet flows of H2, CH4, CO2, CO, H2O, N2   (+ T_out when Q is specified)
+        equations: C, H, O, N balances, WGS and MSR equilibrium             (+ energy balance)
+    The current fixes the oxygen exchanged with the air side, n_O = Ncells*I/(2F). Solving for the
+    logarithms keeps every flow positive, also for trace species (1e-8 CH4 in an electrolysis feed).
 
     Energy specification (one of them):
-        T:  isothermal stack, outlet temperature T [K] (default 1073.15); Q is computed
-        Q:  heat added to the stack [kJ/s]; Q=0 is adiabatic and the outlet temperature is solved
+        T:  isothermal stack at T [K] (default 1073.15); Q is computed
+        Q:  heat added [kJ/s]; Q=0 is adiabatic and the outlet temperature is solved
 
-    Ideal voltage (``V_model``), see docs/electrochemistry.md:
-        'mean':    Nernst potential averaged over the charge passed (default); with T linear in the charge
-                   from the fuel inlet to the outlet. Isothermal with an equilibrium feed it equals the
-                   Gibbs energy approach (G_out - G_in)/(-I*Ncells).
+    Ideal voltage (``V_model``, see docs/electrochemistry.md):
+        'mean':    Nernst potential averaged over the charge passed (default)
         'outlet':  Nernst potential at the outlet
         'streams': Gibbs energy difference of the streams (the former model)
-    All three are available as ``V_mean``, ``V_nernst_out`` and ``V_streams``.
 
     Parameters:
-        name:      objects name
-        MediumF:   fuel side medium with H2, CH4, CO2, CO, H2O, N2 (media.Fuel_CH4())
-        MediumA:   air side medium, media.Air() (O2, N2)
-        I:         current per cell in [A]; negative in electrolysis mode
-        cellArea:  active cell area in [cm2]
+        name, MediumF (media.Fuel_CH4()), MediumA (media.Air())
+        I:         current per cell [A]; negative in electrolysis mode
+        cellArea:  active cell area [cm2]
         Ncells:    number of cells
         f_ASR:     multiplier on the area specific resistance correlation
-        Qloss:     heat exchanged with the surroundings in [kJ/s]; like Q and W positive into the stack, so a
-                   loss is negative (Qloss = -5 means 5 kW lost)
+        Qloss:     heat exchanged with the surroundings [kJ/s], positive into the stack (a loss is negative)
         T, Q:      energy specification, see above
-        V_model:   'mean' (default), 'outlet' or 'streams'
+        V_model:   'mean', 'outlet' or 'streams'
         n_nodes:   quadrature points of the 'mean' voltage
+    Deprecated: Tsoc0/T_soc0 and P_soc (set F0.T, A0.T, F0.P), Tsoc1/T_soc1 (use T), extent (no effect).
 
-    Deprecated: ``Tsoc0``/``T_soc0`` (set ``F0.T``/``A0.T``), ``Tsoc1``/``T_soc1`` (use ``T``),
-    ``P_soc`` (set ``F0.P``/``A0.P``), ``extent`` (no effect).
-
-    Ports: F0 -> F1 (fuel side), A0 -> A1 (air side); the outlets leave at the outlet temperature and the
-    fuel inlet pressure.
+    Ports: F0 -> F1 (fuel side), A0 -> A1 (air side); outlets at the outlet temperature and inlet pressure.
     '''
-    V_models = ('mean', 'outlet', 'streams')
+    #                     H2 CH4 CO2 CO H2O N2
+    ELEMENTS = np.array([[0,  1,  1,  1,  0, 0],      # C
+                         [2,  4,  0,  0,  2, 0],      # H
+                         [0,  0,  2,  1,  1, 0],      # O
+                         [0,  0,  0,  0,  0, 2]])     # N
 
-    def __init__(self, name, MediumF, MediumA, Tsoc0:float|None=None, Tsoc1:float|None=None, I:float=0.0,
-                 cellArea:float=100., Ncells:int|float=1, f_ASR:float=1., extent:bool|None=None, Qloss:float=0.0, *,
-                 T:float|None=None, Q:float|None=None, V_model:str='mean', n_nodes:int=12,
-                 T_soc0:float|None=None, T_soc1:float|None=None, P_soc:float|None=None):
-        if V_model not in self.V_models:
-            raise ValueError(f"{name}: V_model must be one of {self.V_models}, not {V_model!r}")
-        T_in = T_soc0 if T_soc0 is not None else Tsoc0
-        T_out = T_soc1 if T_soc1 is not None else Tsoc1
-        if T_out is not None:
-            if T is not None or Q is not None:
-                raise ValueError(f"{name}: give the outlet temperature as T only")
-            T = T_out
-        if T is not None and Q is not None:
-            raise ValueError(f"{name}: give either T (isothermal) or Q (heat duty), not both")
-        if T is None and Q is None:
-            T = 1073.15
-        super().__init__(dict(name=name, MediumF=MediumF, MediumA=MediumA, I=I, cellArea=cellArea, Ncells=Ncells,
-                              f_ASR=f_ASR, Qloss=Qloss, V_model=V_model, n_nodes=n_nodes,
-                              Tsoc0=T_in, Tsoc1=T_out, extent=bool(extent)))
+    def __init__(self, name, MediumF, MediumA, Tsoc0=None, Tsoc1=None, I:float=0.0, cellArea:float=100.,
+                 Ncells:int|float=1, f_ASR:float=1., extent=None, Qloss:float=0.0, *, T:float|None=None,
+                 Q:float|None=None, V_model:str='mean', n_nodes:int=12, T_soc0=None, T_soc1=None, P_soc=None):
+        T, T_in, P_in = _soc_legacy_inputs(T, Q, Tsoc0, T_soc0, Tsoc1, T_soc1, P_soc, extent)
+        if V_model not in ('mean', 'outlet', 'streams'):
+            raise ValueError(f"{name}: V_model must be 'mean', 'outlet' or 'streams', not {V_model!r}")
+        super().__init__(dict(name=name, I=I, cellArea=cellArea, Ncells=Ncells, f_ASR=f_ASR, Qloss=Qloss,
+                              V_model=V_model, n_nodes=n_nodes))
         self.T_spec, self.Q_spec = T, Q
-
-        T_init = T_in if T_in is not None else (T if T is not None else 1073.15)
-        P_init = 1. if P_soc is None else P_soc
-        self.F0 = interfaces.Flange(name + '.F0', Medium=MediumF, T=T_init, P=P_init)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=MediumF, T=T or T_init, P=P_init)
-        self.A0 = interfaces.Flange(name + '.A0', Medium=MediumA, T=T_init, P=P_init)
-        self.A1 = interfaces.Flange(name + '.A1', Medium=MediumA, T=T or T_init, P=P_init)
-
-        #                     H2 CH4 CO2 CO H2O N2
-        self._nu = np.array([[-1,  0,  0,  0,  1, 0],     # EC:  H2 + O(2-) -> H2O + 2e-
-                             [ 1,  0,  1, -1, -1, 0],     # WGS: CO + H2O <-> CO2 + H2
-                             [ 3, -1,  0,  1, -1, 0]])    # MSR: CH4 + H2O <-> CO + 3 H2
-        self._N_H = np.array([2,4,0,0,2,0])
-        self._N_C = np.array([0,1,1,1,0,0])
-        self._N_O = np.array([0,0,2,1,1,0])
-        self._N_N = np.array([0,0,0,0,0,2])
-        if [str(sp) for sp in MediumF.species] != ['H2', 'CH4', 'CO2', 'CO', 'H2O', 'N2']:
-            raise ValueError(f"{name}: MediumF must hold H2, CH4, CO2, CO, H2O, N2 in this order")
-
-        self.xi_WGS, self.xi_MSR = 0.0, 0.0
-        self._V_mean, self._ASR_mean = np.nan, np.nan
-
-        deprecated_kw = [k for k, v in (('Tsoc0', Tsoc0), ('T_soc0', T_soc0), ('Tsoc1', Tsoc1), ('T_soc1', T_soc1),
-                                        ('P_soc', P_soc), ('extent', extent)) if v is not None]
-        if deprecated_kw:
-            from .._deprecation import warn_deprecated
-            warn_deprecated(f"SOC({', '.join(deprecated_kw)}=...) is deprecated: give the outlet temperature as T= "
-                            f"(or a heat duty Q=), set the inlet state on the flanges (unit.F0.T = ..., unit.F0.P = ...); "
-                            f"extent has no effect, the ideal voltage excludes the reforming reactions",
-                            stacklevel=2)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=MediumF, T=T_in, P=P_in)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=MediumF, T=T or T_in, P=P_in)
+        self.A0 = interfaces.Flange(name + '.A0', Medium=MediumA, T=T_in, P=P_in)
+        self.A1 = interfaces.Flange(name + '.A1', Medium=MediumA, T=T or T_in, P=P_in)
+        self._V_mean = self._ASR_mean = np.nan
 
     # ---- specification ------------------------------------------------------------------------------
     @property
@@ -133,7 +86,7 @@ class SOC(ModelBase):
     @property
     def T(self):
         '''Stack (outlet) temperature: the specified T, or the solved outlet temperature.'''
-        return self.T_spec if self.T_spec is not None else self.F1.T
+        return self.T_spec if self.isothermal else self.F1.T
 
     @T.setter
     def T(self, value):
@@ -154,25 +107,20 @@ class SOC(ModelBase):
     def P_soc(self):
         return self.F1.P
 
-    @P_soc.setter
-    def P_soc(self, P):
-        self.F1.P = P
-        self.A0.P = P
-        self.A1.P = P
-
     @property
     def n_O(self):
-        '''Oxygen ions transferred to the fuel side [mol/s] (negative in electrolysis): the electrochemical extent.'''
+        '''Oxygen ions transferred to the fuel side [mol/s] (negative in electrolysis).'''
         return self.Ncells*self.I/2/F_CONST
 
     @property
-    def xi(self):
-        '''Extents of the electrochemical, water-gas-shift and reforming reactions [mol/s].'''
-        return np.array([self.n_O, self.xi_WGS, self.xi_MSR])
+    def xi_WGS(self):
+        '''Extent of the water-gas shift [mol/s] (CO2 formed).'''
+        return self.F1.n*self.F1.Xi[2] - self.F0.n*self.F0.Xi[2]
 
     @property
-    def MSR_extent(self):
-        return self.xi_MSR
+    def xi_MSR(self):
+        '''Extent of methane reforming [mol/s] (CH4 converted).'''
+        return self.F0.n*self.F0.Xi[1] - self.F1.n*self.F1.Xi[1]
 
     # ---- voltage ------------------------------------------------------------------------------------
     @staticmethod
@@ -182,32 +130,28 @@ class SOC(ModelBase):
         dG = dG0 + _nasa.R*T*(np.log(x_H2O) - np.log(x_H2) - 0.5*np.log(x_O2*P))
         return -dG*1e3/(2*F_CONST)
 
-    def charge_average(self, T1):
+    def update_voltage(self):
         '''
-        Nernst potential and ASR averaged over the charge passed (Gauss-Legendre in lam), with the fuel at
-        local equilibrium and T linear in lam from the fuel inlet to T1.
+        'mean' voltage: the Nernst potential and the ASR averaged over the charge passed (Gauss-Legendre
+        in lam = fraction of the charge), with the fuel at equilibrium and T linear in lam from F0.T to F1.T.
         '''
-        if self.n_O == 0:
-            return np.nan, float(self.ASR(T1))
+        if self.V_model != 'mean' or self.n_O == 0:
+            return
         nodes, weights = np.polynomial.legendre.leggauss(int(self.n_nodes))
-        E, ASR, xi = 0.0, 0.0, (self.xi_WGS, self.xi_MSR)
+        E = ASR = 0.0
+        ln_n = np.log(np.maximum(self.F0.n*np.asarray(self.F0.Xi), 1e-12*self.F0.n))
         for lam, w in zip(0.5*(nodes + 1), 0.5*weights):
-            T = self.F0.T + lam*(T1 - self.F0.T)
-            xi = self.local_equilibrium(lam, T, xi)
-            n = self.fuel_moles(lam, *xi)
+            T = self.F0.T + lam*(self.F1.T - self.F0.T)
+            ln_n = solvers.solve(lambda u: self.fuel_residuals(np.exp(u), T, lam), ln_n, tol=1e-9, name=self.name).x
+            n = np.exp(ln_n)
             n_O2, n_air = self.air_O2(lam)
             E += w*self.nernst(T, self.F0.P, n[0]/n.sum(), n[4]/n.sum(), n_O2/n_air)
             ASR += w*self.ASR(T)
-        return float(E), float(ASR)
-
-    def update_voltage(self):
-        '''Recompute the charge-averaged voltage and ASR for the current outlet temperature.'''
-        if self.V_model == 'mean':
-            self._V_mean, self._ASR_mean = self.charge_average(self.F1.T)
+        self._V_mean, self._ASR_mean = float(E), float(ASR)
 
     @property
     def V_mean(self):
-        '''Charge-averaged Nernst potential [V].'''
+        '''Nernst potential averaged over the charge passed [V].'''
         return self._V_mean
 
     @property
@@ -231,20 +175,10 @@ class SOC(ModelBase):
         '''Ideal (reversible) cell voltage [V] of the chosen ``V_model``.'''
         return {'mean': self.V_mean, 'outlet': self.V_nernst_out, 'streams': self.V_streams}[self.V_model]
 
-    @property
-    def Wid(self):
-        '''Reversible electrical power [kJ/s].'''
-        return self.Vid*(-self.I)*self.Ncells*1e-3
-
     def ASR(self, T=None):
         '''Area specific resistance [Ohm cm2], M. Riedel 2020 DOI 10.1149/1945-7111/ab6820.'''
         T = self.F1.T if T is None else T
         return 7.28e2*np.exp(-8.29e-3*(T - 273.15))
-
-    @property
-    def ASR_eff(self):
-        '''ASR of the ohmic loss: averaged like the voltage ('mean') or at the outlet.'''
-        return self._ASR_mean if self.V_model == 'mean' else float(self.ASR())
 
     @property
     def j(self):
@@ -252,7 +186,8 @@ class SOC(ModelBase):
 
     @property
     def Vop(self):
-        return self.Vid - self.f_ASR*self.ASR_eff*self.j
+        ASR = self._ASR_mean if self.V_model == 'mean' else self.ASR()
+        return self.Vid - self.f_ASR*ASR*self.j
 
     @property
     def W(self):
@@ -306,141 +241,88 @@ class SOC(ModelBase):
         return funs.carbonFraction(f.T, f.P, dict(zip(f.Medium.species, f.Xi)))
 
     # ---- equations and solution ---------------------------------------------------------------------
-    def fuel_moles(self, lam=1.0, xi_WGS=None, xi_MSR=None):
-        '''Fuel-side mole flows [mol/s] after a fraction lam of the charge (lam=1: outlet).'''
-        xi_WGS = self.xi_WGS if xi_WGS is None else xi_WGS
-        xi_MSR = self.xi_MSR if xi_MSR is None else xi_MSR
-        return self.F0.n*np.asarray(self.F0.Xi, dtype=float) + np.array([lam*self.n_O, xi_WGS, xi_MSR]) @ self._nu
-
     def air_O2(self, lam=1.0):
         '''Air-side O2 and total flow [mol/s] after a fraction lam of the charge.'''
         n_O2 = self.A0.n*self.A0.Xi[0] - 0.5*lam*self.n_O
         return n_O2, self.A0.n - 0.5*lam*self.n_O
 
-    @staticmethod
-    def equilibrium_residuals(x, T, P):
-        '''ln(Q/K) of the shift and reforming reactions for the fuel mole fractions x (H2, CH4, CO2, CO, H2O, N2).'''
-        ln_x = np.log(np.maximum(x, 1e-300))
+    def fuel_residuals(self, n, T, lam=1.0):
+        '''
+        Fuel-side equations for the mole flows n (H2, CH4, CO2, CO, H2O, N2) after a fraction lam of the charge:
+        C, H, O, N balances (relative to the element inflow) and the WGS and MSR equilibria (ln Q/K).
+        '''
+        n0 = self.F0.n*np.asarray(self.F0.Xi, dtype=float)
+        element_in = self.ELEMENTS @ n0 + np.array([0, 0, lam*self.n_O, 0])     # O from the air side
+        balances = (self.ELEMENTS @ n - element_in)/np.maximum(self.ELEMENTS @ n0, 1e-30)
+
+        ln_x, ln_P = np.log(n/n.sum()), np.log(self.F0.P)
         H2, CH4, CO2, CO, H2O = ln_x[:5]
-        return np.array([
-            CO2 + H2 - CO - H2O - _lnK('WGS', T),                          # CO + H2O <-> CO2 + H2
-            CO + 3*H2 + 2*np.log(P) - CH4 - H2O - _lnK('MSR', T),          # CH4 + H2O <-> CO + 3 H2
-        ])
+        equilibria = [CO2 + H2 - CO - H2O - _lnK('WGS', T),                     # CO + H2O <-> CO2 + H2
+                      CO + 3*H2 + 2*ln_P - CH4 - H2O - _lnK('MSR', T)]          # CH4 + H2O <-> CO + 3 H2
+        return np.concatenate((balances, equilibria))
 
     def Eqs(self):
-        '''
-        Outlets from the extents and the outlet temperature, then the residuals:
-            WGS equilibrium, MSR equilibrium (and the energy balance when Q is specified).
-        The voltage enters only the energy balance, so it is updated here only for a specified Q
-        (run_sol updates it once at the end otherwise).
-        '''
-        T1 = self.T_spec if self.isothermal else self.F1.T
-        P = self.F0.P
-
-        # fuel side
-        n = self.fuel_moles()
-        self.F1.T, self.F1.P = T1, P
-        self.F1.n = float(n.sum())
-        self.F1.Xi = np.maximum(n, 1e-14*self.F0.n)/np.maximum(n, 1e-14*self.F0.n).sum()
-
-        # air side: O2 to (fuel cell) or from (electrolysis) the fuel side
-        n_O2, n_air = self.air_O2()
-        self.A0.P = P
-        self.A1.T, self.A1.P = T1, P
-        self.A1.n = n_air
-        self.A1.Xi = np.array([n_O2/n_air, 1 - n_O2/n_air])
-
-        Eq = list(self.equilibrium_residuals(n/n.sum(), T1, P))
+        '''Element balances, WGS and MSR equilibrium; with a specified heat duty also the energy balance.'''
+        Eq = list(self.fuel_residuals(self.F1.n*np.asarray(self.F1.Xi), self.F1.T))
         if not self.isothermal:
-            self.update_voltage()
             Eq.append((self.Q - self.Q_spec)/self.F0.n)
         self.Eq = np.array(Eq)
         return self.Eq
 
-    def f_sol(self, x):
-        '''x = (xi_WGS, xi_MSR) for an isothermal stack, (xi_WGS, xi_MSR, T_out) for a specified heat duty.'''
-        self.xi_WGS, self.xi_MSR = x[0], x[1]
-        if not self.isothermal:
-            self.F1.T = x[2]
+    def set_outlets(self, n, T):
+        '''Fuel outlet from the mole flows n; air outlet from the oxygen exchanged; both at T and the inlet pressure.'''
+        P = self.F0.P
+        self.F1.n, self.F1.Xi, self.F1.T, self.F1.P = n.sum(), n/n.sum(), T, P
+        n_O2, n_air = self.air_O2()
+        self.A1.n, self.A1.Xi, self.A1.T, self.A1.P = n_air, np.array([n_O2/n_air, 1 - n_O2/n_air]), T, P
+
+    def f_sol_T(self, x):
+        '''Isothermal stack: x = ln of the fuel outlet flows.'''
+        self.set_outlets(np.exp(x), self.T_spec)
         return self.Eqs()
 
+    def f_sol_Q(self, x):
+        '''Specified heat duty: x = (ln of the fuel outlet flows, outlet temperature).'''
+        self.set_outlets(np.exp(x[:6]), x[6])
+        self.update_voltage()                    # the voltage depends on the outlet temperature
+        return self.Eqs()
+
+    def f_sol(self, x):
+        return self.f_sol_T(x) if self.isothermal else self.f_sol_Q(x)
+
     def run_sol(self, x0=None):
-        '''
-        Isothermal: solve the two equilibria (f_sol) for (xi_WGS, xi_MSR).
-        Heat duty:  solve the energy balance for the outlet temperature; at each trial temperature the extents
-                    are at equilibrium (nested: robust with trace species such as 1e-8 CH4).
-        x0 = (xi_WGS, xi_MSR) is an optional starting point.
-        '''
-        xi0 = (self.xi_WGS, self.xi_MSR) if x0 is None else x0[:2]
+        '''Solve f_sol_T (isothermal) or f_sol_Q (specified heat duty), starting from the feed.'''
+        if x0 is None:
+            x0 = np.log(np.maximum(self.F0.n*np.asarray(self.F0.Xi, dtype=float), 1e-12*self.F0.n))
         if self.isothermal:
-            xi0 = self.local_equilibrium(1.0, self.T_spec, xi0)
-            sol = solvers.solve(self.f_sol, xi0, bounds=self.extent_bounds(), tol=1e-9, name=self.name)
-            self.f_sol(sol.x)
+            sol = solvers.solve(self.f_sol_T, x0, tol=1e-9, name=self.name)
+            self.f_sol_T(sol.x)
+            self.update_voltage()
         else:
-            def energy_balance(T1):
-                xi = self.local_equilibrium(1.0, T1, (self.xi_WGS, self.xi_MSR))
-                return self.f_sol([*xi, T1])[2]
-            T_guess = self.F1.T if 400. < self.F1.T < 2000. else self.F0.T
-            sol = solvers.solve_scalar(energy_balance, 400., 2000., x0=T_guess, tol=1e-10, name=self.name)
-            energy_balance(sol.x[0])
-            if np.max(np.abs(self.Eq)) > 1e-8:
-                sol.success = False
-                warnings.warn(f"{self.name}: not converged (max |residual| = {np.max(np.abs(self.Eq)):.3e})",
-                              solvers.ConvergenceWarning, stacklevel=2)
-        self.update_voltage()
+            x0 = np.append(x0[:6], self.F0.T) if len(x0) == 6 else x0
+            sol = solvers.solve(self.f_sol_Q, x0, tol=1e-9, name=self.name)
+            self.f_sol_Q(sol.x)
         return sol
 
-    def extent_bounds(self, lam=1.0):
-        '''Range of xi_WGS and xi_MSR that keeps every fuel mole flow positive.'''
-        b = self.fuel_moles(lam, 0.0, 0.0)
-        cache = self.__dict__.setdefault('_bounds', {})              # the charge-average revisits the same lam
-        if tuple(b) in cache:
-            return cache[tuple(b)]
-        lo, hi = np.empty(2), np.empty(2)
-        for r in range(2):
-            for sign, out in ((1.0, hi), (-1.0, lo)):
-                c = np.zeros(2); c[r] = -sign
-                res = spo.linprog(c, A_ub=-self._nu[1:].T, b_ub=b, bounds=[(None, None)]*2, method='highs')
-                out[r] = sign*(-res.fun) if res.status == 0 else sign*np.inf
-        span = np.where(np.isfinite(hi - lo), hi - lo, self.F0.n)
-        cache[tuple(b)] = (lo + 1e-12*span, hi - 1e-12*span)
-        return cache[tuple(b)]
 
-    def local_equilibrium(self, lam, T, xi0):
-        '''
-        xi_WGS, xi_MSR at equilibrium after a fraction lam of the charge, at T and the inlet pressure.
-
-        Newton's method on the two equilibrium residuals with the analytical Jacobian
-            d ln(Q_r)/d xi_k = sum_i nu_ri nu_ki / n_i - dnu_r dnu_k / n_tot,
-        each step shortened so that every mole flow stays positive. A generic solver is unreliable here:
-        trace species (1e-8 CH4 in an electrolysis feed) make the residuals extremely steep near the bounds.
-        '''
-        nu = self._nu[1:]
-        dnu = nu.sum(axis=1)                                         # change in moles per reaction (0, 2)
-
-        def residuals(xi):
-            n = self.fuel_moles(lam, *xi)
-            return self.equilibrium_residuals(n/n.sum(), T, self.F0.P)
-
-        xi = np.clip(xi0, *self.extent_bounds(lam))
-        if np.any(self.fuel_moles(lam, *xi) <= 0):
-            xi = 0.5*np.add(*self.extent_bounds(lam))
-        r = residuals(xi)
-        for _ in range(100):
-            if np.max(np.abs(r)) < 1e-12:
-                break
-            n = self.fuel_moles(lam, *xi)
-            J = (nu/n) @ nu.T - np.outer(dnu, dnu)/n.sum()
-            step = np.linalg.solve(J, -r)
-            dn = step @ nu
-            t = min(1.0, 0.95*np.min(-n[dn < 0]/dn[dn < 0])) if np.any(dn < 0) else 1.0
-            while np.linalg.norm(residuals(xi + t*step)) > np.linalg.norm(r) and t > 1e-8:
-                t *= 0.5
-            if t <= 1e-8:                                            # no further progress (round-off)
-                break
-            xi = xi + t*step
-            r = residuals(xi)
-        return xi
+def _soc_legacy_inputs(T, Q, Tsoc0, T_soc0, Tsoc1, T_soc1, P_soc, extent):
+    '''Energy specification and initial inlet state from the SOC arguments, including the deprecated ones.'''
+    old = {'Tsoc0': Tsoc0, 'T_soc0': T_soc0, 'Tsoc1': Tsoc1, 'T_soc1': T_soc1, 'P_soc': P_soc, 'extent': extent}
+    used = [k for k, v in old.items() if v is not None]
+    if used:
+        from .._deprecation import warn_deprecated
+        warn_deprecated(f"SOC({', '.join(used)}=...) is deprecated: give the outlet temperature as T= (or a heat "
+                        f"duty Q=) and set the inlet state on the flanges (unit.F0.T = ..., unit.F0.P = ...); "
+                        f"extent has no effect", stacklevel=4)
+    T_out = T_soc1 if T_soc1 is not None else Tsoc1
+    if T_out is not None:
+        T = T_out
+    if T is not None and Q is not None:
+        raise ValueError("SOC: give either T (isothermal) or Q (heat duty), not both")
+    if T is None and Q is None:
+        T = 1073.15
+    T_in = T_soc0 if T_soc0 is not None else (Tsoc0 if Tsoc0 is not None else (T or 1073.15))
+    return T, T_in, (1.0 if P_soc is None else P_soc)
 
 
 class AEL(ModelBase):
