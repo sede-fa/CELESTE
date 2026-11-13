@@ -258,15 +258,25 @@ class CompIsent(Compressor):
 
 class CompPolytropic(CompIsent):
     """
-    Adiabatic compressor with a polytropic efficiency ``eff``, integrated in ``stages`` isentropic steps of
-    equal pressure ratio (``stages=1`` is the isentropic model).
+    Adiabatic compressor with a polytropic efficiency ``eff``.
+
+    For an ideal-gas medium (the NASA media) the polytropic path has a closed form for any cp(T): from
+    ``dh = v dP/eff`` and ``T ds = dh - v dP`` follows ``ds = (1/eff - 1) R dP/P``, so the outlet entropy is
+    ``s1 = s0 + (1/eff - 1) R ln(P1/P0)`` and one temperature solve gives the outlet. Other media (equation of
+    state, CoolProp) integrate the path in ``stages`` isentropic steps instead (error ~ 1/stages).
     """
     def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1.0, stages:int=50, **legacy):
         super().__init__(name, Medium=Medium, eff=eff, **legacy)
         self._stages = stages
 
     def Eqs(self):
-        self._path(self.eff, self._stages)
+        F0, F1 = self.F0, self.F1
+        if not isinstance(F0.Medium, media.Medium_NASAbase):
+            return self._path(self.eff, self._stages)
+        F1.n, F1.Xi = F0.n, F0.Xi
+        eff = self.eff if F1.P > F0.P else 1/self.eff
+        F1.T = F0.T
+        F1.T_sPX(F0.s + (1/eff - 1)*F0.Medium.R*np.log(F1.P/F0.P), F1.P, F0.Xi)
 
 
 class CompIsot(Compressor):

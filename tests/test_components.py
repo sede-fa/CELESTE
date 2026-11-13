@@ -340,23 +340,30 @@ def test_gpu_input_checks():
         components.GPU_2SV2('g', media.Fuel_CH4(), Sep=np.array([1.5, 1, 1, 1, 0, 1]))
 
 
-def test_polytropic_compressor_converges_to_the_polytropic_path():
+def test_polytropic_compressor_closed_form_matches_the_staged_path():
     from celeste.CSL.turbomachinery import CompPolytropic
     isentropic = components.CompIsent('c', media.Air(), eff=0.8)
     isentropic.F1.P = 5.0
     isentropic.run_sol()
-    T = []
-    for stages in (1, 10, 50, 200):
-        c = CompPolytropic('p', media.Air(), eff=0.8, stages=stages)
-        c.F1.P = 5.0
-        assert c.run_sol().success
-        T.append(c.F1.T)
-    assert T[0] == pytest.approx(isentropic.F1.T, abs=1e-9)             # one stage is the isentropic model
-    assert T[0] < T[1] < T[2] < T[3] and T[3] - T[2] < 0.3              # more stages: hotter, converging (as 1/stages)
-    c = CompPolytropic('p', media.Air(), eff=1.0)
+    c = CompPolytropic('p', media.Air(), eff=0.8)
     c.F1.P = 5.0
+    assert c.run_sol().success
+    assert c.F1.T > isentropic.F1.T                                  # polytropic: reheat of the staged compression
+    T = []
+    for stages in (10, 100, 800):
+        c._path(0.8, stages)
+        T.append(c.F1.T)
     c.run_sol()
-    assert c.Sgen == pytest.approx(0.0, abs=1e-10)
+    assert T[0] < T[1] < T[2] < c.F1.T and c.F1.T - T[2] < 0.05      # the stage integration converges to it as 1/stages
+    t = CompPolytropic('t', media.Air(), eff=0.85)                     # expansion
+    t.F0.T, t.F0.P, t.F1.P = 900.0, 8.0, 1.0
+    t.run_sol()
+    t._path(0.85, 800)
+    assert t.F1.T == pytest.approx(563.17, abs=0.02) and t.W < 0
+    r = CompPolytropic('p', media.Air(), eff=1.0)
+    r.F1.P = 5.0
+    r.run_sol()
+    assert r.Sgen == pytest.approx(0.0, abs=1e-10)
 
 
 def test_compressors_are_importable_from_components():

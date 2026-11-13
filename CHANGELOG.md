@@ -59,8 +59,8 @@ version may notice.
 - **`CSL.turbomachinery`** (from main): compressors and turbines with performance maps. The compressor models
   live here (`Compressor`, `CompIsot`, `CompIsent`, `CompressorMapped`, `Turbine`, `TurbineMapped`); one
   real-gas path (`_RealGasPath`) serves the isentropic compressor, the polytropic compressor and the mapped
-  compressors and turbines. **`CompPolytropic`**: polytropic efficiency, integrated in `stages` (default 50) isentropic
-  steps
+  compressors and turbines. **`CompPolytropic`**: polytropic efficiency; closed form for ideal-gas (NASA) media, any cp(T): the outlet
+  entropy is s0 + (1/eff − 1)·R·ln(P1/P0); other media integrate in `stages` isentropic steps
 - Transport properties (from main): `mu`, `k`, `Pr` of the media (Chung viscosity, Eucken conductivity, Wilke and
   Mason–Saxena mixing; CoolProp for `*_CP`) and of the flanges, `Flange.rho`; vectorised in NumPy (no Numba)
 - `media.Fluegas`, `FluegasIncomplete`, `AirHumid` (from main)
