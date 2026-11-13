@@ -87,22 +87,14 @@ class MethanolLoop(SysBase):
             X_feed = np.array([0.72, 1e-8, 0.20, 0.06, 1e-8, 0.02, 1e-8])     # stoichiometric number ~ 2
         self.feed = flow.SourceM(name + '.feed', gas, F1_n=n_feed, F1_Xi=np.asarray(X_feed, dtype=float), F1_T=T_feed, F1_P=P)
         self.mix = flow.Mixer(name + '.mix', gas)
-        self.mix.F0.T = T_feed
-        self.mix.F0.P = P
-        self.mix.F1.n = 1e-6*n_feed
-        self.mix.F1.Xi = np.asarray(X_feed, dtype=float)
-        self.mix.F1.T = T_feed
-        self.mix.F1.P = P
-        self.mix.F2.T = T_feed
-        self.mix.F2.P = P
+        self.mix.F1.n = 1e-6*n_feed                       # tear stream starts at ~zero recycle
+        self.mix.F1.Medium.PTX = (P, T_feed, np.asarray(X_feed, dtype=float))
         self.preheat = heat.Heater(name + '.preheat', gas, gas)
         self.preheat.F1.T = T_reac
         self.preheat.F1.P = P
         if reactor not in ('equilibrium', 'yield'):
             raise ValueError("reactor must be 'equilibrium' or 'yield'")
         self.reactor = reactors.MeOH(name + '.reactor', gas, model=reactor, Yield=Yield, T=T_reac)
-        self.reactor.F0.T = T_reac
-        self.reactor.F0.P = P
         self.cond = CondenserBox(name + '.cond', gas, T_cond=T_cond)
         self.split = flow.Splitter(name + '.split', gas, Split=1.0 - purge)
         self.purge_out = flow.Sink(name + '.purge_out', gas)
