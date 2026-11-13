@@ -20,7 +20,7 @@ import numpy as np
 
 from ..jx import nasa as _nasa
 
-__all__ = ["K_eq", "K_WGS", "K_rWGS", "K_MSR", "K_PSR", "K_NH3", "K_MeOH_CO2", "K_MeOH_CO",
+__all__ = ["K_eq", "ln_K", "fuel_residuals", "FUEL_SPECIES", "FUEL_ELEMENTS", "K_WGS", "K_rWGS", "K_MSR", "K_PSR", "K_NH3", "K_MeOH_CO2", "K_MeOH_CO",
            "K_WGS_fit", "K_MSR_fit", "K_rWGS_Graaf", "K_MeOH_CO2_Graaf", "K_MeOH_CO_Graaf"]
 
 _R_FIT = 8.314  # J/mol/K, value used when the fits were made
@@ -33,6 +33,7 @@ REACTIONS = {
     'MeOH_CO':  {'CO': -1, 'H2': -2, 'CH3OH': 1},                   # CO + 2 H2 <-> CH3OH
     'NH3':      {'N2': -0.5, 'H2': -1.5, 'NH3': 1},                 # 1/2 N2 + 3/2 H2 <-> NH3
     'PSR':      {'C3H8': -1, 'H2O': -3, 'CO': 3, 'H2': 7},          # C3H8 + 3 H2O <-> 3 CO + 7 H2
+    'H2_ox':    {'H2': -1, 'O2': -0.5, 'H2O': 1},                   # H2 + 1/2 O2 <-> H2O
 }
 
 
@@ -66,6 +67,37 @@ def K_eq(T, reaction, exp=np.exp):
                                xp.asarray(d.T_lo), xp.asarray(d.T_hi))
     dG = xp.sum(xp.asarray(nu)*(h - T*s))
     return exp(-dG/(_nasa.R*T))
+
+
+@lru_cache(maxsize=4096)
+def ln_K(reaction: str, T: float) -> float:
+    """ln K of a named reaction at T [K] (cached: solvers revisit the same temperature)."""
+    return float(np.log(K_eq(float(T), reaction)))
+
+
+# ---- fuel-side equilibrium of the shift and reforming reactions (MR, SOC) -----------------------------
+FUEL_SPECIES = ['H2', 'CH4', 'CO2', 'CO', 'H2O', 'N2']       #: species order of media.Fuel_CH4()
+#: atoms per mol of species (rows C, H, O, N)
+FUEL_ELEMENTS = np.array([[0, 1, 1, 1, 0, 0],
+                          [2, 4, 0, 0, 2, 0],
+                          [0, 0, 2, 1, 1, 0],
+                          [0, 0, 0, 0, 0, 2]])
+
+
+def fuel_residuals(n, n0, T, P, O_in=0.0):
+    """
+    Equations of a fuel-side stream (H2, CH4, CO2, CO, H2O, N2) at shift and reforming equilibrium:
+    the C, H, O, N balances between the inlet flows ``n0`` and the outlet flows ``n`` (relative to the
+    element inflow; ``O_in`` is oxygen added from elsewhere, mol/s), then the water-gas shift and
+    methane reforming equilibria as ln(Q/K), at T [K] and P [bar].
+    """
+    n, n0 = np.asarray(n, dtype=float), np.asarray(n0, dtype=float)
+    balances = (FUEL_ELEMENTS @ n - FUEL_ELEMENTS @ n0 - np.array([0, 0, O_in, 0]))/np.maximum(FUEL_ELEMENTS @ n0, 1e-30)
+    H2, CH4, CO2, CO, H2O = np.log(n[:5]/n.sum())
+    return np.concatenate((balances, [
+        CO2 + H2 - CO - H2O - ln_K('WGS', T),                          # CO + H2O <-> CO2 + H2
+        CO + 3*H2 + 2*np.log(P) - CH4 - H2O - ln_K('MSR', T),          # CH4 + H2O <-> CO + 3 H2
+    ]))
 
 
 def K_WGS(T, exp=np.exp):

@@ -1,8 +1,8 @@
 """
 Reactors models
 
-1) EquilBase:     Base model for isothermal reactors (ports F0 -> F1, shared exergy / entropy balances)
-2) MR:            Methanation / steam reforming + water-gas shift at equilibrium
+1) EquilBase:     Former base of the isothermal reactors, kept for user models (no CSL model uses it any more)
+2) MR:            Methanation / steam reforming + water-gas shift at equilibrium (ln-flow unknowns, ExtentReactor energy options)
 3) ExtentReactor: Base for reactors solved for their reaction extents (isothermal, adiabatic or given Q)
 4) HB:            Haber-Bosch, kinetic (HB_Adiabatic: former adiabatic class, now HB(..., Q=0)); HB_1D: plug-flow bed
 5) MeOH:         Methanol synthesis: equilibrium, yield or kinetic (Van den Bussche & Froment); isothermal,
@@ -99,63 +99,6 @@ class EquilBase(ModelBase):
         upper = np.concatenate(([np.inf], np.ones(x0.size - 1)))
         return solvers.solve(f_sol, x0, bounds=(lower, upper), scale=scale, name=self.name)
 
-class MR(EquilBase):
-    """ 
-        Medium: media.Fuel_CH4()
-    """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4(), 
-                 T:float=500.15, P:float=23.0, Q:float=0.0,
-                 F0_n:float=1.0, F0_Xi=None, #F0_Xi:npArray[np.float64]|None=None, 
-                 F1_n:float=1.0, F1_Xi=None #F1_Xi:npArray[np.float64]|None=None
-                ):          
-        super().__init__(name, Medium=Medium, T=T, P=P, F0_n=F0_n, F0_Xi=F0_Xi, F1_n=F1_n, F1_Xi=F1_Xi, Q=Q) 
-        self._N_H = np.array([2,4,0,0,2,0])
-        self._N_C = np.array([0,1,1,1,0,0])
-        self._N_O = np.array([0,0,2,1,1,0])
-        self._N_N = np.array([0,0,0,0,0,2])
-        
-    def Eqs(self):
-        
-        self.Eq:npArray[np.float64] = np.array([
-            # MB
-            self.F0.n*(np.dot(self.F0.Xi, self._N_C)) - self.F1.n*(np.dot(self.F1.Xi, self._N_C)), 
-            self.F0.n*(np.dot(self.F0.Xi, self._N_H)) - self.F1.n*(np.dot(self.F1.Xi, self._N_H)), 
-            self.F0.n*(np.dot(self.F0.Xi, self._N_O)) - self.F1.n*(np.dot(self.F1.Xi, self._N_O)), 
-            self.F0.n*(np.dot(self.F0.Xi, self._N_N)) - self.F1.n*(np.dot(self.F1.Xi, self._N_N)), 
-            np.sum(self.F1.Xi) - 1, 
-            # Equil
-            self.F1.Xi[3]*self.F1.Xi[4]*self.K_WGS() - (self.F1.Xi[2]*self.F1.Xi[0]), 
-            self.F1.Xi[1]*self.F1.Xi[4]*self.K_MSR() - (self.F1.Xi[3]*self.F1.Xi[0]**3*self.F1.P**2), 
-        ])
-        self.Q = (self.F1.n*self.F1.h - self.F0.n*self.F0.h )
-        
-        self.F0_n = self.F0.n
-        self.F0_Xi = self.F0.Xi
-        self.F1_n = self.F1.n
-        self.F1_Xi = self.F1.Xi
-        
-        return self.Eq
-    
-    def K_WGS(self):
-        return eq.K_WGS(self.F1.T)
-
-    def K_MSR(self):
-        return eq.K_MSR(self.F1.T)
-
-    def f_sol(self, x):  
-        self.F1.n = x[0]
-        self.F1.Xi = x[1:7] 
-        return self.Eqs()
-        
-    def run_sol(self, method=None):
-        """Solve for the outlet. ``method`` may be a scipy-style solver ``method(fun, x0)`` to bypass the default."""
-        x0 = np.concatenate(([self.F0.n], self.F0.Xi)) 
-        if method is not None:
-            sol = method(self.f_sol, x0)
-            self.f_sol(sol.x)
-            return sol
-        return self._solve_composition(self.f_sol, x0)
-
 class ExtentReactor(ModelBase):
     """
     Base of reactors solved for their reaction extents (one inlet F0, one outlet F1).
@@ -205,6 +148,7 @@ class ExtentReactor(ModelBase):
     def T(self, value):
         '''Setting T makes the reactor isothermal at T.'''
         self.T_spec, self.Q_spec = value, None
+        self._select_mode()
 
     @property
     def Q(self):
@@ -215,6 +159,10 @@ class ExtentReactor(ModelBase):
     def Q(self, value):
         '''Setting Q (0 for adiabatic) makes the outlet temperature follow from the energy balance.'''
         self.Q_spec, self.T_spec = value, None
+        self._select_mode()
+
+    def _select_mode(self):
+        '''Hook run when T or Q is set (models that pick their equations by energy specification override it).'''
 
     @property
     def xi(self):
@@ -358,6 +306,101 @@ class ExtentReactor(ModelBase):
     def MBcheck(self) -> float:
         '''Mass in - mass out [g/s] (zero by construction).'''
         return self.F0.m - self.F1.m
+
+
+class MR(ExtentReactor):
+    """
+    Methanation / steam reforming reactor with the fuel at water-gas-shift and methane-reforming equilibrium.
+
+    System of equations (``Eqs``), the same as in the SOC without current:
+        unknowns:  ln of the outlet flows of H2, CH4, CO2, CO, H2O, N2   (+ T_out when Q is specified)
+        equations: C, H, O, N balances, WGS and MSR equilibrium         (+ energy balance)
+    Solving for the logarithms keeps every flow positive, also for trace species. The extents ``xi_WGS``
+    and ``xi_MSR`` follow from the flows.
+
+    Isothermal (give ``T``, or nothing: inlet temperature), adiabatic (``Q=0``) or with a given heat duty ``Q``;
+    ``reactor.T = ...`` / ``reactor.Q = ...`` switch an existing reactor.
+
+    Parameters (design):
+        Medium: media.Fuel_CH4() (H2, CH4, CO2, CO, H2O, N2)
+        T, Q:   energy specification (see :class:`ExtentReactor`)
+        dP:     pressure drop [bar]
+        P:      deprecated, set ``reactor.F0.P``
+
+    Inlet state: set ``reactor.F0.n``, ``.Xi``, ``.T``, ``.P``; stand-alone default 500.15 K and 23 bar.
+
+    Properties: Q, xi (WGS, MSR) [mol/s], Exloss, Exeff, Sgen
+    """
+    reactions = {'WGS': eq.REACTIONS['WGS'], 'MSR': eq.REACTIONS['MSR']}
+    _default_state = {'F0': dict(n=1.0, T=500.15, P=23.0)}
+
+    def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4(), T:float|None=None, P:float|None=None,
+                 Q:float|None=None, dP:float=0.0, **legacy):
+        if [str(sp) for sp in Medium.species] != eq.FUEL_SPECIES:
+            raise ValueError(f"{name}: Medium must hold {eq.FUEL_SPECIES} in this order (media.Fuel_CH4())")
+        legacy.pop('F1_n', None); legacy.pop('F1_Xi', None)
+        super().__init__(name, Medium, T=T, Q=Q, dP=dP)
+        if P is not None:
+            legacy.setdefault('F0_P', P)
+        self._init_state(legacy)
+        if T is not None and 'F0_T' not in legacy:
+            self.F0.T = T                       # stand-alone: feed at the reactor temperature, as before
+        self.F1.n, self.F1.Xi, self.F1.T, self.F1.P = self.F0.n, self.F0.Xi, self.F0.T, self.F0.P
+        self._select_mode()
+
+    def _select_mode(self):
+        if self.isothermal:
+            self.Eqs, self.f_sol, self.n_unknowns = self.Eqs_T, self.f_sol_T, 6
+        else:
+            self.Eqs, self.f_sol, self.n_unknowns = self.Eqs_Q, self.f_sol_Q, 7
+
+    @property
+    def xi(self):
+        '''Extents of the water-gas shift (CO2 formed) and of methane reforming (CH4 converted) [mol/s].'''
+        return np.array([self.F1.n*self.F1.Xi[2] - self.F0.n*self.F0.Xi[2],
+                         self.F0.n*self.F0.Xi[1] - self.F1.n*self.F1.Xi[1]])
+
+    def Eqs_T(self):
+        '''Isothermal: element balances, WGS and MSR equilibrium.'''
+        self.Eq = eq.fuel_residuals(self.F1.n*np.asarray(self.F1.Xi), self.F0.n*np.asarray(self.F0.Xi),
+                                    self.F1.T, self.F1.P)
+        return self.Eq
+
+    def Eqs_Q(self):
+        '''Specified heat duty: element balances, WGS and MSR equilibrium, energy balance.'''
+        self.Eq = np.append(self.Eqs_T(), (self.Q - self.Q_spec)/self.F0.n)
+        return self.Eq
+
+    def set_outlet(self, n, T):
+        self.F1.n, self.F1.Xi, self.F1.T, self.F1.P = n.sum(), n/n.sum(), T, self.F0.P - self.dP
+
+    def f_sol_T(self, x):
+        '''Isothermal reactor: x = ln of the outlet flows.'''
+        self.set_outlet(np.exp(x), self.T_spec if self.T_spec is not None else self.F0.T)
+        return self.Eqs_T()
+
+    def f_sol_Q(self, x):
+        '''Specified heat duty: x = (ln of the outlet flows, outlet temperature).'''
+        self.set_outlet(np.exp(x[:6]), x[6])
+        return self.Eqs_Q()
+
+    def run_sol(self, x0=None, method=None):
+        '''
+        Solve ``f_sol`` (chosen by T= / Q=), starting from the feed (and the inlet temperature).
+        ``method`` may be a scipy-style solver ``method(fun, x0)`` to bypass the default.
+        '''
+        if x0 is None:
+            ln_feed = np.log(np.maximum(self.F0.n*np.asarray(self.F0.Xi, dtype=float), 1e-12*self.F0.n))
+            x0 = np.append(ln_feed, self.F0.T)[:self.n_unknowns]
+        sol = solvers.solve(self.f_sol, x0, tol=1e-9, name=self.name) if method is None else method(self.f_sol, x0)
+        self.f_sol(sol.x)
+        return sol
+
+    def K_WGS(self):
+        return eq.K_WGS(self.F1.T)
+
+    def K_MSR(self):
+        return eq.K_MSR(self.F1.T)
 
 
 class HB(ExtentReactor):

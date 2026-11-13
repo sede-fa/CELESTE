@@ -21,7 +21,8 @@ def assert_physical(flange):
 
 
 def test_methanation_equilibrium():
-    r = reactors.MR('r', F0_Xi=np.array([0.6, 0.01, 0.2, 0.1, 0.08, 0.01]), T=600.0, P=10.0)
+    r = reactors.MR('r', T=600.0)
+    r.F0.Xi, r.F0.P = np.array([0.6, 0.01, 0.2, 0.1, 0.08, 0.01]), 10.0
     sol = r.run_sol()
     assert sol.success and sol.residual_norm < 1e-7
     np.testing.assert_allclose(r.F1.Xi, [0.0151, 0.2786, 0.1944, 0.0002, 0.4964, 0.0153], atol=5e-5)
@@ -33,6 +34,26 @@ def test_methanation_equilibrium():
     assert r.Exloss > 0 and r.Sgen > 0 and 0 < r.Exeff < 1
     import scipy.optimize as spo
     assert r.run_sol(method=spo.least_squares).cost < 1e-10      # user supplied solver still accepted
+    # extents follow from the flows and reproduce the outlet
+    nu = np.array([[1, 0, 1, -1, -1, 0], [3, -1, 0, 1, -1, 0]])
+    np.testing.assert_allclose(r.F1.n*r.F1.Xi, r.F0.n*r.F0.Xi + r.xi @ nu, atol=1e-12)
+
+
+def test_methanation_energy_specification_and_trace_feeds():
+    r = reactors.MR('r', T=500.0)
+    r.F0.Xi, r.F0.n, r.F0.P = np.array([0.2, 0.25, 0.05, 0.05, 0.45, 1e-4]), 2.0, 10.0
+    assert r.run_sol().success and r.isothermal
+    x = r.F1.Xi                                                  # a methanation feed at 500 K: traces of CO and H2
+    assert x[3] < 1e-5 and x[2]*x[0]/(x[3]*x[4]) == pytest.approx(equilibrium.K_WGS(500.0), rel=1e-6)
+    iso_Q = r.Q
+    r.Q = 0.0                                                    # switch the same reactor to adiabatic
+    assert r.run_sol().success and r.F1.T > 500.0 and r.Q == pytest.approx(0.0, abs=1e-8)
+    assert r.energy_balance() == pytest.approx(0.0, abs=1e-8)
+    r.T = 500.0                                                  # and back
+    assert r.run_sol().success and r.Q == pytest.approx(iso_Q, rel=1e-8)
+    with pytest.warns(DeprecationWarning):
+        old = reactors.MR('r', F0_Xi=np.array([0.6, 0.01, 0.2, 0.1, 0.08, 0.01]), T=600.0, P=10.0)
+    assert old.run_sol().success and (old.F0.P, old.F1.P, old.F0.T) == (10.0, 10.0, 600.0)
 
 
 def test_equilibrium_constants_from_nasa_gibbs_energies():

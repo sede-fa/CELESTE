@@ -5,22 +5,12 @@ Electrochemical reactors
 from . import interfaces, ModelBase
 from . import equilibrium as eq
 from .exergy import T0
-from functools import lru_cache
 from ..jx import nasa as _nasa
 from .. import solvers
 import numpy as np
 from celeste import functions as funs
 
 F_CONST = 96485  #: Faraday constant used by the electrochemical models, C/mol
-
-
-_REACTIONS = {**eq.REACTIONS, 'H2ox': {'H2': -1, 'O2': -0.5, 'H2O': 1}}
-
-
-@lru_cache(maxsize=4096)
-def _lnK(reaction: str, T: float) -> float:
-    """ln K of a reaction at T, from the NASA Gibbs energies (cached: the solvers revisit the same T)."""
-    return float(np.log(eq.K_eq(float(T), _REACTIONS[reaction])))
 
 
 class SOC(ModelBase):
@@ -58,11 +48,7 @@ class SOC(ModelBase):
 
     Ports: F0 -> F1 (fuel side), A0 -> A1 (air side); outlets at the outlet temperature and inlet pressure.
     '''
-    #                     H2 CH4 CO2 CO H2O N2
-    ELEMENTS = np.array([[0,  1,  1,  1,  0, 0],      # C
-                         [2,  4,  0,  0,  2, 0],      # H
-                         [0,  0,  2,  1,  1, 0],      # O
-                         [0,  0,  0,  0,  0, 2]])     # N
+    ELEMENTS = eq.FUEL_ELEMENTS                       # rows C, H, O, N
 
     def __init__(self, name, MediumF, MediumA, Tsoc0=None, Tsoc1=None, I:float=0.0, cellArea:float=100.,
                  Ncells:int|float=1, f_ASR:float=1., extent=None, Qloss:float=0.0, *, T:float|None=None,
@@ -131,7 +117,7 @@ class SOC(ModelBase):
     @staticmethod
     def nernst(T, P, x_H2, x_H2O, x_O2):
         '''Nernst potential of H2 + 1/2 O2 -> H2O [V] at T [K], P [bar] and the given mole fractions.'''
-        dG0 = -_nasa.R*T*_lnK('H2ox', T)                                    # kJ/mol
+        dG0 = -_nasa.R*T*eq.ln_K('H2_ox', T)                                    # kJ/mol
         dG = dG0 + _nasa.R*T*(np.log(x_H2O) - np.log(x_H2) - 0.5*np.log(x_O2*P))
         return -dG*1e3/(2*F_CONST)
 
@@ -252,19 +238,8 @@ class SOC(ModelBase):
         return n_O2, self.A0.n - 0.5*lam*self.n_O
 
     def fuel_residuals(self, n, T, lam=1.0):
-        '''
-        Fuel-side equations for the mole flows n (H2, CH4, CO2, CO, H2O, N2) after a fraction lam of the charge:
-        C, H, O, N balances (relative to the element inflow) and the WGS and MSR equilibria (ln Q/K).
-        '''
-        n0 = self.F0.n*np.asarray(self.F0.Xi, dtype=float)
-        element_in = self.ELEMENTS @ n0 + np.array([0, 0, lam*self.n_O, 0])     # O from the air side
-        balances = (self.ELEMENTS @ n - element_in)/np.maximum(self.ELEMENTS @ n0, 1e-30)
-
-        ln_x, ln_P = np.log(n/n.sum()), np.log(self.F0.P)
-        H2, CH4, CO2, CO, H2O = ln_x[:5]
-        equilibria = [CO2 + H2 - CO - H2O - _lnK('WGS', T),                     # CO + H2O <-> CO2 + H2
-                      CO + 3*H2 + 2*ln_P - CH4 - H2O - _lnK('MSR', T)]          # CH4 + H2O <-> CO + 3 H2
-        return np.concatenate((balances, equilibria))
+        '''Fuel-side equations (``eq.fuel_residuals``) after a fraction lam of the charge; the oxygen comes from the air side.'''
+        return eq.fuel_residuals(n, self.F0.n*np.asarray(self.F0.Xi, dtype=float), T, self.F0.P, lam*self.n_O)
 
     def Eqs_T(self):
         '''Isothermal: element balances, WGS and MSR equilibrium.'''

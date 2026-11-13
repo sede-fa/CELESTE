@@ -29,7 +29,8 @@ print(f'cooler: duty {cooler.Q:.3f} kW\n')
 
 # --- a reactor ----------------------------------------------------------------------------------------
 feed = np.array([0.60, 0.01, 0.20, 0.10, 0.08, 0.01])      # H2, CH4, CO2, CO, H2O, N2
-reactor = reactors.MR('methanation', F0_n=10.0, F0_Xi=feed, T=600.0, P=10.0)
+reactor = reactors.MR('methanation', T=600.0)
+reactor.F0.n, reactor.F0.Xi, reactor.F0.P = 10.0, feed, 10.0
 sol = reactor.run_sol()
 print(f'methanation: converged={sol.success} ({sol.method}), residual {sol.residual_norm:.1e}')
 print(reactor.ViewFlange(reactor).round(4), '\n')

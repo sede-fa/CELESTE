@@ -60,7 +60,8 @@ def test_compressor():
 def test_equilibrium_reactor_matches_csl(x0, T, P):
     x0 = np.array(x0)
     out, Q = jax.jit(lambda t, p: units.ShiftReformingEquilibrium(FUEL, t, p)(units.Stream(1.0, t, p, x0)))(T, P)
-    ref = reactors.MR('r', F0_Xi=np.maximum(x0, 1e-10), T=T, P=P)
+    ref = reactors.MR('r', T=T)
+    ref.F0.Xi, ref.F0.P = np.maximum(x0, 1e-10), P
     assert ref.run_sol().success
     np.testing.assert_allclose(out.x, ref.F1.Xi, atol=2e-6)
     assert float(out.n) == pytest.approx(ref.F1.n, rel=1e-6)

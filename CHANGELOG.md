@@ -21,6 +21,10 @@ version may notice.
   media; `CSL.thermo.Thermo_PR`
 - **`CSL.reactors.ExtentReactor`** – base for reactors solved for their reaction extents: element balances
   close by construction; energy specification `T` (isothermal) or `Q` (`Q=0` adiabatic)
+- **`CSL.reactors.MR`** on the pattern of the SOC: unknowns are the logarithms of the outlet flows, equations the
+  element balances and the shift and reforming equilibria (`CSL.equilibrium.fuel_residuals`, shared with the SOC);
+  isothermal, adiabatic (`Q=0`) or with a given heat duty; `reactor.T = ...` / `reactor.Q = ...` switch an existing
+  reactor; `xi` returns the shift and reforming extents. `CSL.equilibrium.ln_K`
 - **`CSL.reactors.HB`** – one Haber–Bosch model for isothermal, adiabatic and cooled operation (kinetics of the
   former `HB_Adiabatic`); **`HB_1D`** – plug-flow bed integrated along its volume (profiles in `.profile`)
 - **`CSL.reactors.MeOH`** – one methanol reactor: `model='equilibrium' | 'yield' | 'kinetic'`, isothermal,
@@ -105,6 +109,10 @@ version may notice.
 - `SOC.EnthalpyEfficiency`: the methane heating value used CO instead of CH4 (CO2 + 2 H2O − CO − 2 O2), and the
   heating values were taken at the stack temperature. It now uses the lower heating values of the medium
   (`Flange.LHV`, 25 °C): default electrolysis case 0.9707 → 0.9453.
+- `MR` at low temperature: the solver reported convergence for outlets that were not at equilibrium (the absolute
+  mass-action residuals are tiny when products are trace species). At 500 K and 1–30 bar, 15 of 84 test feeds were
+  off by up to 0.09 in a mole fraction; all 84 now satisfy both equilibria to 1e-13, and the solve is about 40 times
+  faster.
 - `Mixer`: two inlets within 0.001 % in temperature were treated as equal, so the outlet temperature jumped by up
   to a few mK; this stalled recycle solvers near convergence.
 - A medium created with its own species list (`media.Fuel_CH4(species=[...], Xi=...)`) was reset to the
@@ -163,6 +171,8 @@ version may notice.
 | Equilibrium constants | empirical fits: linear Gibbs fit (MR, SOC, MeOH_WGS, Reformer with 32.115), Graaf (MeOH_Equil, MeOH_Yield) | from the NASA Gibbs energies, consistent with `h`, `s` | WGS at 450 K: 257 → 399 (fit), 378 → 399 (Graaf); within 0.6 % at SOC temperatures. Methanol loop carbon efficiency 0.9002 → 0.9087 |
 | `HB` (isothermal) | Nielsen constants of the original `HB`, outlet at the inlet temperature | constants of `HB_Adiabatic` (one rate law); isothermal at `T` | test case NH3 0.3658 → 0.3677 |
 | Isothermal methanol reactors | outlet at the inlet temperature (constructor `T` set both) | at the specified `T` | only when the feed temperature differs from `T` in a system |
+| `MR` outlet at ≤ 500 K | not at equilibrium for many feeds (see Fixed) | equilibrium | up to 0.09 in a mole fraction at 500 K, 1 bar; unchanged to 1e-6 above 700 K |
+| `MR(Q=...)` | ignored (the duty was always computed) | heat duty; `Q=0` adiabatic | only callers that passed `Q` |
 | Reactor and SOC results | – | same roots, solver tolerance tighter | relative 1e-6 or smaller |
 | `SOC.Vid` | Gibbs energy difference of the streams (with `extent=True` minus a reforming term that is zero at equilibrium) | charge-averaged Nernst potential (`V_model='mean'`); the former value is `V_streams` / `V_model='streams'` | identical for an isothermal stack fed at equilibrium. Feed not at equilibrium: its relaxation is no longer counted as work, e.g. `SOECSys` 1.2212779 → 1.2212782 V, `SOCsysRecupe` 1.397895 → 1.397950 V, co-electrolysis test feed 0.8325 → 0.8402 V, fuel cell fed with 25 % CH4 (internal reforming) by 0.43 V, because the reforming of the feed towards equilibrium was counted as electrical work. With a temperature change the former value was not a voltage |
 
@@ -179,7 +189,7 @@ These keep working and emit a `CelesteDeprecationWarning`:
 | `HB_Adiabatic(...)` | `HB(..., Q=0)`; outlet pressure `F1_P` → pressure drop `dP` |
 | `MeOH_Equil`, `MeOH_Yield`, `MeOH_Kinetic` | `MeOH(..., model='equilibrium' / 'yield' / 'kinetic', T=...)` |
 | `MeOH_WGS` | `MeOH(..., model='yield', Q=0)` |
-| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P`; `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash`, `Valve`, `Pump` (also their `n`, `Xi`), CSL `GPU_*` | set the state on the flanges: `unit.F0.n = ...`, `heater.F1.T = ...`, `comp.F1.P = ...` |
+| state keywords of unit constructors (`F0_n`, `F0_Xi`, `F0_T`, `F0_P`, outlet specs such as `F1_T`, `F1_P`; reactor `P` (also `MR(..., P=)`); `T`/`P` of `Mixer`/`Splitter`; `T`/`n`/`Xi` of `ASU`/`DAC`) – `HB`, `MeOH`, `MR`, `SOC`, `Heater`, `Compressor`, `CompIsot`, `CompIsent`, `ASU`, `DAC`, `Mixer`, `Splitter`, `Sink`, `Flash`, `Valve`, `Pump` (also their `n`, `Xi`), CSL `GPU_*` | set the state on the flanges: `unit.F0.n = ...`, `heater.F1.T = ...`, `comp.F1.P = ...` |
 | `Recycle_FPI`, `Recycle_Wegstein_q`, `Recycle_Wegstein_Generic`, `Recycle_Wegstein_Generic2`, `Recycle_Steffensen`, `Recycle_Aitken`, `Recycle_Hybrid_FPI_Aitken`, `recycle_solver` | `Recycle_Tear(..., method='direct' / 'wegstein' / 'aitken')`; the wrappers converge the full tear stream, so they may take a different number of passes |
 | `Thermo.updateBoolArr()`, `thermoArr()`, `getCoeffs()` | nothing – handled inside `calcThermoSep()` |
 | `EquilBase.ExBs()` (methanol reactors) | `Exth`, `Exloss`, `Exeff` are properties |

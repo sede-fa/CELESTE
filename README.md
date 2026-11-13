@@ -20,8 +20,9 @@ rigorous equipment design.
 import numpy as np
 from celeste.CSL import media, reactors
 
-reactor = reactors.MR('methanation', T=600.0, P=10.0)                    # design: isothermal at 600 K, 10 bar
+reactor = reactors.MR('methanation', T=600.0)                            # design: isothermal at 600 K
 reactor.F0.n = 10.0                                                        # feed, mol/s
+reactor.F0.P = 10.0                                                        # bar
 reactor.F0.Xi = np.array([0.60, 0.01, 0.20, 0.10, 0.08, 0.01])             # H2, CH4, CO2, CO, H2O, N2
 reactor.run_sol()
 

@@ -111,7 +111,7 @@ gives a stand-alone unit a sensible starting point.
 
 The former state keywords (`F0_n=`, `F0_Xi=`, `F1_T=`, `F1_P=`, ...) are still
 accepted and land on the same flanges, with a `CelesteDeprecationWarning`.
-`SourceM` keeps its `F1_*` arguments: they define the source. `AEL`, `MR` and the
+`SourceM` keeps its `F1_*` arguments: they define the source. `AEL` and the
 FT units have not been migrated yet.
 
 | Member | Purpose |
