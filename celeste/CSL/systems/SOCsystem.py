@@ -13,7 +13,7 @@ class SOCBasicSys(SysBase):
         
         self.sf1 = flow.SourceM(name + '.sf1', Medium=media.Fuel_CH4(), F1_n=nf0, F1_Xi=Xf0, F1_T=T_soc, F1_P=P_soc) 
         self.sa1 = flow.SourceM(name + '.sa1', Medium=media.Air(), F1_n=na0, F1_Xi=Xa0, F1_T=T_soc, F1_P=P_soc) 
-        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells) 
+        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T=T_soc, I=I, cellArea=cellArea, Ncells=Ncells) 
         self.sf2 = flow.Sink(name + '.sf2', Medium=media.Fuel_CH4()) 
         self.sa2 = flow.Sink(name + '.sa2', Medium=media.Air())  
         
@@ -44,7 +44,7 @@ class SOCsysRecupe(SysBase):
         self.HT_A0 = heat.Heater(name+'.HT_A1', Medium0=media.Air(), Medium1=media.Air())
         self.HT_A0.F1.T = T_soc
 
-        self.soc = electrochem.SOC(name+'.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, T_soc1=T_soc, I=I, Ncells=Ncells, cellArea=cellArea)
+        self.soc = electrochem.SOC(name+'.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T=T_soc, I=I, Ncells=Ncells, cellArea=cellArea)
 
         self.F1 = interfaces.Flange(name+'.F1', media.Fuel_CH4())
         self.A1 = interfaces.Flange(name+'.A1', media.Air())

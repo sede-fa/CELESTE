@@ -74,12 +74,15 @@ class SOECSys(SysBase):
     def __init__(self, name, T0=298.15, P0=1, I=None, Ncells=None, T_soc=1073.15, P_soc=1, cellArea=127.8, 
                  ext=False, T_HT2=378.15): 
         super().__init__(locals())
+        if ext:
+            from ..._deprecation import warn_deprecated
+            warn_deprecated(f"{type(self).__name__}(ext=True) is deprecated and has no effect: the SOC ideal "
+                            "voltage excludes the reforming reactions", stacklevel=2)
                 
         self.F1 = interfaces.Flange(name + '.F1', Medium=media.Fuel_CH4(), T=T_soc, P=P_soc) 
         self.A1 = interfaces.Flange(name + '.A1', Medium=media.Air(), T=T_soc, P=P_soc)      
         
-        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, 
-                                   T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells, extent=ext) 
+        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T=T_soc, I=I, cellArea=cellArea, Ncells=Ncells) 
         self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air())
         self.HT_A2.F1.T = T0
         self.HT_A2.F1.P = P_soc
@@ -131,12 +134,15 @@ class SOECSysV2(SysBase):
     def __init__(self, name, T0=298.15, P0=1., I=None, Ncells=None, T_soc=1073.15, P_soc=1., 
                  cellArea=127.8, ext=False): 
         super().__init__(locals())
+        if ext:
+            from ..._deprecation import warn_deprecated
+            warn_deprecated(f"{type(self).__name__}(ext=True) is deprecated and has no effect: the SOC ideal "
+                            "voltage excludes the reforming reactions", stacklevel=2)
         
         self.F1 = interfaces.Flange(name + '.F1', Medium=media.Fuel_CH4(), T=T_soc, P=P_soc) 
         self.A1 = interfaces.Flange(name + '.A1', Medium=media.Air(), T=T_soc, P=P_soc)       
         
-        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, 
-                                   T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells, extent=ext)    
+        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T=T_soc, I=I, cellArea=cellArea, Ncells=Ncells)    
         self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air())
         self.HT_A2.F1.T = T0
         self.HT_A2.F1.P = P_soc
@@ -184,11 +190,15 @@ class CO2Sys(SysBase):
     '''
     def __init__(self, name, T0=298.15, P0=1, I=None, Ncells=None, T_soc=1073.15, P_soc=1, cellArea=127.8, ext=False, T_HT2=298.15): 
         super().__init__(locals())
+        if ext:
+            from ..._deprecation import warn_deprecated
+            warn_deprecated(f"{type(self).__name__}(ext=True) is deprecated and has no effect: the SOC ideal "
+                            "voltage excludes the reforming reactions", stacklevel=2)
         
         self.F1 = interfaces.Flange(name + '.F1', Medium=media.Fuel_CH4(), T=T_soc, P=P_soc) # n=nf0, Xi=Xf0,  
         self.A1 = interfaces.Flange(name + '.A1', Medium=media.Air(), T=T_soc, P=P_soc) #n=na0, Xi=Xa0,        
         
-        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T_soc0=T_soc, T_soc1=T_soc, P_soc=P_soc, I=I, cellArea=cellArea, Ncells=Ncells, extent=ext) 
+        self.soc = electrochem.SOC(name + '.soc', MediumF=media.Fuel_CH4(), MediumA=media.Air(), T=T_soc, I=I, cellArea=cellArea, Ncells=Ncells) 
         self.HT_A2 = heat.Heater(name + '.HT_A2', Medium0=media.Air(), Medium1=media.Air())
         self.HT_A2.F1.T = T0
         self.HT_A2.F1.P = P0

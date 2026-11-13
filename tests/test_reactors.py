@@ -188,9 +188,99 @@ def test_solid_oxide_cell():
     assert soc.mass_balance() == pytest.approx(0.0, abs=1e-8)
     assert soc.F0.n*np.dot(soc.F0.Xi, soc._N_H) == pytest.approx(soc.F1.n*np.dot(soc.F1.Xi, soc._N_H), rel=1e-8)
     assert soc.Exloss > 0 and soc.j == -0.5 and 0 < soc.RC < 1
-    # alternative spellings used by the system models
-    alt = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), T_soc0=1000.0, T_soc1=1050.0, P_soc=3.0, I=-10.0, Ncells=10)
+    # former keywords still work, with a deprecation warning
+    with pytest.warns(DeprecationWarning, match='outlet temperature as T='):
+        alt = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), T_soc0=1000.0, T_soc1=1050.0, P_soc=3.0, I=-10.0, Ncells=10)
     assert (alt.F0.T, alt.F1.T, alt.F0.P, alt.A1.P) == (1000.0, 1050.0, 3.0, 3.0) and alt.Tsoc0 == 1000.0
+    assert alt.T == 1050.0 and alt.isothermal
+    with pytest.warns(DeprecationWarning):
+        electrochem.SOC('s', media.Fuel_CH4(), media.Air(), extent=True)
+    with pytest.raises(ValueError):
+        electrochem.SOC('s', media.Fuel_CH4(), media.Air(), T=1073.15, Q=0.0)
+    with pytest.raises(ValueError):
+        electrochem.SOC('s', media.Fuel_CH4(), media.Air(), V_model='nernst')
+
+
+def _co_electrolysis(**kw):
+    kw = {'I': -200.0, 'Ncells': 100, **kw}
+    soc = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), **kw)
+    soc.F0.n, soc.F0.Xi = 1.0, np.array([0.05, 1e-8, 0.3, 1e-8, 0.65, 1e-8])
+    soc.A0.n = 2.0
+    soc.F0.T = soc.A0.T = 1073.15
+    return soc
+
+
+def test_soc_extents_close_the_balances_and_reach_equilibrium():
+    soc = _co_electrolysis()
+    assert soc.run_sol().success
+    xi = soc.xi
+    assert xi[0] == pytest.approx(soc.n_O) and soc.n_O < 0
+    n0, n1 = soc.F0.n*soc.F0.Xi, soc.F1.n*soc.F1.Xi
+    for N in (soc._N_C, soc._N_H, soc._N_N):
+        assert np.dot(n0, N) == pytest.approx(np.dot(n1, N), rel=1e-10)
+    assert np.dot(n0, soc._N_O) + soc.n_O == pytest.approx(np.dot(n1, soc._N_O), rel=1e-10)
+    assert soc.mass_balance() == pytest.approx(0.0, abs=1e-10)
+    x = dict(zip(soc.F1.Medium.species, soc.F1.Xi))
+    assert x['CO2']*x['H2']/(x['CO']*x['H2O']) == pytest.approx(soc.K_WGS(), rel=1e-8)
+    assert x['CO']*x['H2']**3*soc.F1.P**2/(x['CH4']*x['H2O']) == pytest.approx(soc.K_MSR(), rel=1e-8)
+    assert soc.energy_balance() == pytest.approx(0.0, abs=1e-10)
+
+
+def test_soc_voltage_models():
+    soc = _co_electrolysis()
+    soc.run_sol()
+    # in electrolysis the local Nernst potential rises along the cell
+    assert soc.V_nernst_in < soc.Vid == soc.V_mean < soc.V_nernst_out
+    # fed with an equilibrium mixture, the charge-averaged Nernst potential of an isothermal stack is the
+    # Gibbs energy difference of the streams
+    feed = _co_electrolysis(I=-1e-6)
+    feed.run_sol()
+    eq_soc = _co_electrolysis()
+    eq_soc.F0.n, eq_soc.F0.Xi = feed.F1.n, feed.F1.Xi.copy()
+    eq_soc.run_sol()
+    assert eq_soc.V_mean == pytest.approx(eq_soc.V_streams, abs=1e-9)
+    out = _co_electrolysis(V_model='outlet')
+    out.run_sol()
+    assert out.Vid == out.V_nernst_out and np.isnan(out.V_mean)
+    assert out.Vop == pytest.approx(out.Vid - out.ASR()*out.j)
+    streams = _co_electrolysis(V_model='streams')
+    streams.run_sol()
+    assert streams.Vid == pytest.approx(soc.V_streams)
+
+
+def test_soc_adiabatic_and_heat_duty():
+    iso = _co_electrolysis(T=1100.0)
+    iso.run_sol()
+    # the heat duty of the isothermal stack, specified, gives back its temperature
+    duty = _co_electrolysis(Q=float(iso.Q))
+    duty.F1.T = 1000.0
+    assert duty.run_sol().success
+    assert duty.F1.T == pytest.approx(1100.0, abs=1e-6) and duty.Vop == pytest.approx(iso.Vop, abs=1e-8)
+    adi = _co_electrolysis(Q=0.0)
+    assert adi.run_sol().success and not adi.isothermal
+    assert adi.Q == pytest.approx(0.0, abs=1e-8) and adi.energy_balance() == pytest.approx(0.0, abs=1e-8)
+    assert adi.F1.T == adi.A1.T and adi.F1.T > adi.F0.T          # above the thermoneutral voltage
+    lossy = _co_electrolysis(Q=0.0, Qloss=-2.0)
+    lossy.run_sol()
+    assert lossy.F1.T < adi.F1.T and lossy.energy_balance() == pytest.approx(0.0, abs=1e-8)
+    # the stream Gibbs energy difference is no voltage once the temperature changes
+    assert abs(adi.V_streams - adi.V_mean) > 1.0
+    adi.T = 1073.15
+    assert adi.isothermal and adi.run_sol().success and adi.F1.T == 1073.15
+
+
+def test_soc_heat_loss_and_gouy_stodola():
+    soc = _co_electrolysis()
+    soc.run_sol()
+    lossy = _co_electrolysis(Qloss=-3.0)
+    lossy.run_sol()
+    assert lossy.Q == pytest.approx(soc.Q + 3.0) and lossy.W == pytest.approx(soc.W)
+    T0 = 298.15
+    gap, gap_lossy = soc.Exloss - T0*soc.Sgen, lossy.Exloss - T0*lossy.Sgen
+    # Exloss = T0*Sgen up to the mismatch of the tabulated chemical exergies with the NASA data, which
+    # depends on the extents only (docs/known_issues.md)
+    assert gap_lossy == pytest.approx(gap, abs=1e-10) and abs(gap) < 1e-3*soc.W
+    assert lossy.Exloss > soc.Exloss
 
 
 def test_alkaline_electrolyser():

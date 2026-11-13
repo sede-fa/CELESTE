@@ -201,6 +201,7 @@ library.
 | [docs/thermodynamics.md](docs/thermodynamics.md) | property models, their limits, exergy definition |
 | [docs/separation.md](docs/separation.md) | flash models: usage, algorithm, validation, limits |
 | [docs/recycles.md](docs/recycles.md) | converging recycles and heat-recovery loops |
+| [docs/electrochemistry.md](docs/electrochemistry.md) | solid oxide cell: extents, energy specification, ideal voltage |
 | [docs/heat_integration.md](docs/heat_integration.md) | pinch analysis and heat exchanger network synthesis |
 | [docs/jax_roadmap.md](docs/jax_roadmap.md) | the JAX layer, Equinox units, equation-oriented solution |
 | [docs/sharp_corners.md](docs/sharp_corners.md) | intended behaviour that can surprise a new user |
