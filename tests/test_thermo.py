@@ -215,3 +215,16 @@ def test_transport_properties():
     # the flange passes them on
     f = interfaces.Flange('f', Medium=media.Air(), T=500.0)
     assert (f.mu, f.k, f.Pr) == (f.Medium.mu, f.Medium.k, f.Medium.Pr)
+
+
+def test_transport_properties_of_real_fluid_media():
+    gas, ideal = media.Fuel_CH4_PR(), media.Fuel_CH4()
+    for m in (gas, ideal):
+        m.T = 500.0
+    assert (gas.mu, gas.k) == pytest.approx((ideal.mu, ideal.k), rel=1e-12) and 0.5 < gas.Pr < 0.8
+    liquid = media.Water_PR()
+    liquid.T, liquid.P = 300.0, 5.0
+    assert liquid.state == 'liquid'
+    assert liquid.mu == pytest.approx(8.5e-4, rel=0.1) and liquid.k == pytest.approx(0.61, rel=0.05)
+    f = interfaces.Flange('f', Medium=media.Air_PR(), T=400.0)
+    assert f.mu == f.Medium.mu and f.Pr == f.Medium.Pr

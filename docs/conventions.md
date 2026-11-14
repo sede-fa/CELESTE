@@ -235,7 +235,8 @@ is no version number in the source tree. Between releases the version is
 
 ## Type checking
 
-The code carries no type annotations (they cost readability, and the models set their flanges and parameters
-dynamically). `pyproject.toml` configures pyright to check what does not need them: undefined names, unreachable
-code, syntax. New code follows the same rule: write plain, readable signatures and docstrings, and do not add
-annotations or `# type:` comments to silence the checker; adjust `[tool.pyright]` instead if a whole category is noise.
+Public signatures carry type hints (`name: str`, `T: float`, `Medium: media.Medium_Base`, `-> None`, ...) so that
+editors and pyright can help; `celeste._types.Array` is the alias for arrays of floats. Hints stay light: no
+`# type:` comments or casts to silence the checker. The models set their flanges and parameters dynamically, so
+`[tool.pyright]` in `pyproject.toml` switches off the checks that need declared attributes; undefined names,
+unreachable code and syntax stay on. `pyright` reports 0 errors.

@@ -152,112 +152,19 @@ def _as_float(v):
     return float(v)
 
 
-class Thermo:
+class _Transport:
     '''
-    Ideal-gas / ideal-mixture properties from NASA-9 polynomials.
-
-    Inputs:
-        species: sequence of species names (see ``Thermo.df.index`` for what is available)
-        T:       temperature, K (or degC with ``T_unit='C'``)
-        Xi:      mole fractions, np.array[len=nSpecies]
-        P:       pressure, bar
-
-    Attrs (recomputed automatically when T, P or Xi are set):
-        cp_i, h_i, s_i, g_i:  species values at T and the standard pressure of 1 bar
-        cp, h, s, g:          mixture values; kJ/mol/K, kJ/mol, kJ/mol/K, kJ/mol
-        s_T:                  mixture entropy without the mixing / pressure term
-
-    Notes:
-        * Outside the fitted temperature range of a species its heat capacity is
-          frozen at the range limit, so properties stay finite and continuous
-          (``in_range`` tells whether the current state is inside the fit).
-        * ``H2O(L)`` is treated as a separate condensed phase: it carries no
-          mixing or pressure entropy.
+    Viscosity ``mu``, thermal conductivity ``k`` and Prandtl number ``Pr`` of the mixture from the low-pressure
+    gas theory (see the note above). The host class provides ``species``, ``Ns``, ``_T``, ``_Xi``, ``_MWi``, ``cp``,
+    ``getMW`` and the hooks ``_cp_species()`` (ideal-gas heat capacity of the species, kJ/mol/K) and
+    ``_liquid_species()`` (species currently treated as liquid water or methanol: [(index, 'H2O' | 'CH3OH')]).
     '''
-    R = _nasa.R
-
     # conductivity of the pure species: 1 = Eucken (Modelica's default), 2 = modified Eucken (Poling et al.);
     # can be overridden per instance, e.g. ``medium.condMethod = 1``
     condMethod = 2
-    s_lhv = pd.Series(_nasa.LHV_TABLE)
 
-    @_classproperty
-    def df(cls):
-        '''NASA database as a DataFrame indexed by species name (loaded on first access).'''
-        return _nasa.species_table()
-
-    def __init__(self, species, T: float, Xi, P: float = 1., T_unit: str = 'K'):
-
-        self.species = species  # nSpecies
-        self.Ns = len(self.species)
-
-        if T_unit in ['C', 'c']:
-            T = T + 273.15
-
-        data = _nasa.nasa_data(species)
-        self._data = data
-        self._a = data.a
-        self._T_break = data.T_break
-        self._T_fit_lo = float(data.T_lo.max()) if self.Ns else 0.0
-        self._T_fit_hi = float(data.T_hi.min()) if self.Ns else math.inf
-        self._MWi = data.mw
-        self._lhv_i = data.lhv
-        self._no_mix = np.array([1.0 if str(s) == 'H2O(L)' else 0.0 for s in species])
-        self._gas = 1.0 - self._no_mix
-        self.maxTint = data.a.shape[1]
-
-        self._T = _as_float(T)
-        self._Xi = Xi  # nSpecies
-        self._P = P
-
-        self.calcThermoSep()
-        self.calcThermoMix()
-        self.setupTransport()
-
-    ## Methods
-    def getMW(self):
-        return np.dot(self._MWi, self._Xi)
-
-    @property
-    def in_range(self) -> bool:
-        '''True when T lies inside the fitted range of every species.'''
-        return self._T_fit_lo <= self._T <= self._T_fit_hi
-
-    def calcThermoSep(self):
-        '''Species properties at the current T: sets cp_i, h_i, s_i, g_i (each of shape nSpecies).'''
-        T = self._T
-        if self._T_fit_lo <= T <= self._T_fit_hi:
-            M = _nasa.pure_props_scalar(T, self._a, self._T_break)
-        else:
-            M = np.stack(_nasa.pure_props(np, T, self._a, self._T_break, self._data.T_lo, self._data.T_hi))
-        self._M = M                                   # (3, nSpecies): one product gives all mixture sums
-        self.cp_i, self.h_i, self.s_i = M
-        self.g_i = self.h_i - T*self.s_i
-
-    def calcThermoMix(self):
-        '''Mixture properties at the current T, P, Xi: sets cp, h, s_T, s, g.'''
-        X = self._Xi if type(self._Xi) is np.ndarray and self._Xi.dtype == np.float64 else np.asarray(self._Xi, dtype=float)
-        self.cp, self.h, self.s_T = self._M @ X
-        if X.size and X.min() > 0.0:
-            s_mix = (X*np.log(X*self._P)) @ self._gas
-        else:
-            pos = X > 0.0
-            s_mix = np.sum(np.where(pos, X*np.log(np.where(pos, X, 1.0)*self._P), 0.0)*self._gas)
-        self.s = self.s_T - self.R*s_mix
-        self.g = self.h - self._T*self.s
-
-    @deprecated('interval selection is handled inside calcThermoSep()', removal=None)
-    def updateBoolArr(self):
-        return None
-
-    @deprecated('the temperature basis is built inside calcThermoSep()', removal=None)
-    def thermoArr(self):
-        return None
-
-    @deprecated('coefficients are cached per species set in celeste.jx.nasa.nasa_data()', removal=None)
-    def getCoeffs(self):
-        return None
-
+    def _liquid_species(self):
+        return self._liquid_pseudo
 
     def setupTransport(self):
         '''Build the per-species transport-property tables (critical/polar data for the
@@ -293,6 +200,7 @@ class Thermo:
                 unknown.append(sp)
 
         self._hasTransportData = self._isGasTransport | self._isLiqTransport
+        self._liquid_pseudo = [(i, self.species[i][:-3]) for i in np.nonzero(self._isLiqTransport)[0]]
 
         if unknown:
             print(f"Warning: no transport (viscosity/thermal conductivity) data for "
@@ -308,21 +216,22 @@ class Thermo:
         self.mu_i = np.zeros(self.Ns)
         self.k_i = np.zeros(self.Ns)
 
-        if np.any(self._isGasTransport):
-            g = self._isGasTransport
+        liquid = [i for i, _ in self._liquid_species()]
+        g = self._isGasTransport.copy()
+        g[liquid] = False
+        if np.any(g):
             self.mu_i[g] = _chungViscosityArr(self._T, self._MWi[g], self._Tc_i[g],
                                                self._Vc_i[g], self._w_i[g],
                                                self._dipole_i[g], self._kappa_i[g])
-            cp_mass_g = self.cp_i[g]*1e6/self._MWi[g]   # J/(kg.K)
+            cp_mass_g = self._cp_species()[g]*1e6/self._MWi[g]   # J/(kg.K)
             R_mass_g = self.R*1e6/self._MWi[g]          # J/(kg.K)
             self.k_i[g] = _euckenConductivityArr(self.mu_i[g], cp_mass_g, R_mass_g, self.condMethod)
 
-        for i in np.nonzero(self._isLiqTransport)[0]:
-            sp = self.species[i]
-            if sp == 'H2O(L)':
+        for i, liquid in self._liquid_species():
+            if liquid == 'H2O':
                 self.mu_i[i] = _waterLiquidViscosity(self._T)
                 self.k_i[i] = _waterLiquidConductivity(self._T)
-            elif sp == 'CH3OH(L)':
+            else:
                 self.mu_i[i] = _methanolLiquidViscosity(self._T)
                 self.k_i[i] = _methanolLiquidConductivity(self._T)
 
@@ -366,7 +275,115 @@ class Thermo:
     def Pr(self) -> float:
         '''Mixture Prandtl number / -'''
         return self.mu*self.cp_mass/self.k
-    
+
+
+class Thermo(_Transport):
+    '''
+    Ideal-gas / ideal-mixture properties from NASA-9 polynomials.
+
+    Inputs:
+        species: sequence of species names (see ``Thermo.df.index`` for what is available)
+        T:       temperature, K (or degC with ``T_unit='C'``)
+        Xi:      mole fractions, np.array[len=nSpecies]
+        P:       pressure, bar
+
+    Attrs (recomputed automatically when T, P or Xi are set):
+        cp_i, h_i, s_i, g_i:  species values at T and the standard pressure of 1 bar
+        cp, h, s, g:          mixture values; kJ/mol/K, kJ/mol, kJ/mol/K, kJ/mol
+        s_T:                  mixture entropy without the mixing / pressure term
+
+    Notes:
+        * Outside the fitted temperature range of a species its heat capacity is
+          frozen at the range limit, so properties stay finite and continuous
+          (``in_range`` tells whether the current state is inside the fit).
+        * ``H2O(L)`` is treated as a separate condensed phase: it carries no
+          mixing or pressure entropy.
+    '''
+    R = _nasa.R
+
+    s_lhv = pd.Series(_nasa.LHV_TABLE)
+
+    @_classproperty
+    def df(cls):
+        '''NASA database as a DataFrame indexed by species name (loaded on first access).'''
+        return _nasa.species_table()
+
+    def __init__(self, species, T: float, Xi, P: float = 1., T_unit: str = 'K'):
+
+        self.species = species  # nSpecies
+        self.Ns = len(self.species)
+
+        if T_unit in ['C', 'c']:
+            T = T + 273.15
+
+        data = _nasa.nasa_data(species)
+        self._data = data
+        self._a = data.a
+        self._T_break = data.T_break
+        self._T_fit_lo = float(data.T_lo.max()) if self.Ns else 0.0
+        self._T_fit_hi = float(data.T_hi.min()) if self.Ns else math.inf
+        self._MWi = data.mw
+        self._lhv_i = data.lhv
+        self._no_mix = np.array([1.0 if str(s) == 'H2O(L)' else 0.0 for s in species])
+        self._gas = 1.0 - self._no_mix
+        self.maxTint = data.a.shape[1]
+
+        self._T = _as_float(T)
+        self._Xi = Xi  # nSpecies
+        self._P = P
+
+        self.calcThermoSep()
+        self.calcThermoMix()
+        self.setupTransport()
+
+    ## Methods
+    def getMW(self):
+        return np.dot(self._MWi, self._Xi)
+
+    def _cp_species(self):
+        return self.cp_i
+
+    @property
+    def in_range(self) -> bool:
+        '''True when T lies inside the fitted range of every species.'''
+        return self._T_fit_lo <= self._T <= self._T_fit_hi
+
+    def calcThermoSep(self):
+        '''Species properties at the current T: sets cp_i, h_i, s_i, g_i (each of shape nSpecies).'''
+        T = self._T
+        if self._T_fit_lo <= T <= self._T_fit_hi:
+            M = _nasa.pure_props_scalar(T, self._a, self._T_break)
+        else:
+            M = np.stack(_nasa.pure_props(np, T, self._a, self._T_break, self._data.T_lo, self._data.T_hi))
+        self._M = M                                   # (3, nSpecies): one product gives all mixture sums
+        self.cp_i, self.h_i, self.s_i = M
+        self.g_i = self.h_i - T*self.s_i
+
+    def calcThermoMix(self):
+        '''Mixture properties at the current T, P, Xi: sets cp, h, s_T, s, g.'''
+        X = self._Xi if type(self._Xi) is np.ndarray and self._Xi.dtype == np.float64 else np.asarray(self._Xi, dtype=float)
+        self.cp, self.h, self.s_T = self._M @ X
+        if X.size and X.min() > 0.0:
+            s_mix = (X*np.log(X*self._P)) @ self._gas
+        else:
+            pos = X > 0.0
+            s_mix = np.sum(np.where(pos, X*np.log(np.where(pos, X, 1.0)*self._P), 0.0)*self._gas)
+        self.s = self.s_T - self.R*s_mix
+        self.g = self.h - self._T*self.s
+
+    @deprecated('interval selection is handled inside calcThermoSep()', removal=None)
+    def updateBoolArr(self):
+        return None
+
+    @deprecated('the temperature basis is built inside calcThermoSep()', removal=None)
+    def thermoArr(self):
+        return None
+
+    @deprecated('coefficients are cached per species set in celeste.jx.nasa.nasa_data()', removal=None)
+    def getCoeffs(self):
+        return None
+
+
     # Calculate LHV of mixture
     @property
     def LHVmix(self):
@@ -731,6 +748,7 @@ class _PRModel:
         self.lhv = d.lhv
         _, h0, s0 = _nasa.pure_props(np, 298.15, d.a, d.T_break, d.T_lo, d.T_hi)
         self.g0_i = h0 - 298.15*s0          # standard Gibbs energy of the ideal gases at T0, P0
+        self.nasa = d
 
     @classmethod
     def get(cls, species, kij):
@@ -746,7 +764,7 @@ class _PRModel:
         return cls._cache[key]
 
 
-class Thermo_PR:
+class Thermo_PR(_Transport):
     '''
     Real-fluid properties from the Peng-Robinson equation of state (JAX), with
     the NASA polynomials as ideal-gas reference. The JAX-native alternative to
@@ -790,6 +808,17 @@ class Thermo_PR:
         self._phase = phase
         self._st = None
         self._cp = None
+        self.setupTransport()
+
+    def _cp_species(self):
+        d = self._model.nasa
+        return _nasa.pure_props(np, self._T, d.a, d.T_break, d.T_lo, d.T_hi)[0]
+
+    def _liquid_species(self):
+        '''Liquid water and methanol of a liquid state use the liquid correlations; vapour and two-phase states the gas theory.'''
+        if self.state != 'liquid':
+            return []
+        return [(i, sp) for i, sp in enumerate(self.species) if sp in ('H2O', 'CH3OH')]
 
     @staticmethod
     def _code(phase):

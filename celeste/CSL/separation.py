@@ -9,6 +9,7 @@ separators in ``components`` (GPU_2S, ...), which split a stream by prescribed
 fractions, the split of a Flash follows from thermodynamics.
 '''
 import numpy as np
+from .._types import Array
 
 from . import ModelBase, interfaces, media
 from .. import solvers
@@ -16,7 +17,7 @@ from ..jx import nasa as _nasa
 from .thermo import _PRModel
 
 
-def _liquid_medium(Medium):
+def _liquid_medium(Medium: media.Medium_Base):
     """NASA medium for the liquid outlet: species with liquid-phase data switch to it ('H2O' -> 'H2O(L)')."""
     from .exergy import exergy_table
     known = set(_nasa.species_names())
@@ -143,40 +144,40 @@ class Flash(ModelBase):
         return np.array([self.Q - self.Q_spec])
 
     @property
-    def P(self):
+    def P(self) -> float:
         """Drum pressure [bar]"""
         return self.F0.P - self.dP if self.P_spec is None else self.P_spec
 
     @property
-    def T(self):
+    def T(self) -> float:
         """Drum temperature [K]"""
         return self.F1.T
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         """Heat added to the drum [kJ/s]"""
         return self.F1.n*self.F1.h + self.F2.n*self.F2.h - self.F0.n*self.F0.h
 
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - 298.15/self.F1.T)
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.n*self.F1.s + self.F2.n*self.F2.s - self.F0.n*self.F0.s - self.Q/self.F1.T
 
     @property
-    def recovery(self):
+    def recovery(self) -> float:
         """Fraction of every component of the feed that leaves with the liquid (F2)"""
         feed = self.F0.n*np.asarray(self.F0.Xi, dtype=float)
         liquid = self.F2.n*np.asarray(self.F2.Xi, dtype=float)
         return np.divide(liquid, feed, out=np.zeros_like(feed), where=feed > 0)
 
-    def f_sol(self, x):
+    def f_sol(self, x: Array) -> Array:
         self._split(x[0], self.P)
         return self.Eqs()
 

@@ -31,7 +31,7 @@ class CondenserBox(SysBase):
     Ports: F0 (feed) -> F1 (gas), F2 (liquid)
     Units: ``cooler`` (heat.Heater), ``drum`` (separation.Flash)
     """
-    def __init__(self, name, Medium, T_cond=303.15, dP=0.0):
+    def __init__(self, name: str, Medium: media.Medium_Base, T_cond: float = 303.15, dP: float = 0.0):
         super().__init__(locals())
         self.cooler = heat.Heater(name + '.cooler', Medium0=Medium, Medium1=Medium)
         self.cooler.F1.T = T_cond
@@ -40,17 +40,17 @@ class CondenserBox(SysBase):
         self.F1 = interfaces.Flange(name + '.F1', Medium=self.drum.F1.Medium)
         self.F2 = interfaces.Flange(name + '.F2', Medium=self.drum.F2.Medium)
 
-    def seq_sol(self, store=False):
+    def seq_sol(self, store: bool = False) -> None:
         self.connect_seq(self.F0, self.cooler.F0, store=store)
         self.cooler.F1.T = self.T_cond
-        self.cooler._sol = self.cooler.run_sol()
+        self.solve(self.cooler)
         self.connect_seq(self.cooler.F1, self.drum.F0, store=store)
-        self.drum._sol = self.drum.run_sol()
+        self.solve(self.drum)
         self.connect_seq(self.drum.F1, self.F1, store=store)
         self.connect_seq(self.drum.F2, self.F2, store=store)
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         """Total heat removed by cooler and drum [kJ/s] (negative)"""
         return self.cooler.Q + self.drum.Q
 
@@ -79,8 +79,8 @@ class MethanolLoop(SysBase):
     Solve with ``run_sol()``; results: ``carbon_efficiency``, ``recycle_ratio``,
     ``product`` (flange of the crude methanol) and all the SysBase reports.
     """
-    def __init__(self, name, n_feed=100.0, X_feed=None, T_reac=523.15, P=50.0, T_cond=313.15, purge=0.02,
-                 reactor='equilibrium', Yield=0.35, T_feed=313.15):
+    def __init__(self, name: str, n_feed: float = 100.0, X_feed=None, T_reac: float = 523.15, P: float = 50.0, T_cond: float = 313.15, purge: float = 0.02,
+                 reactor: str = 'equilibrium', Yield: float = 0.35, T_feed: float = 313.15):
         super().__init__(locals())
         gas = media.Fuel_MeOH()
         if X_feed is None:
@@ -100,34 +100,34 @@ class MethanolLoop(SysBase):
         self.purge_out = flow.Sink(name + '.purge_out', gas)
         self.product = flow.Sink(name + '.product', self.cond.F2.Medium)
 
-    def seq_sol(self, store=False):
+    def seq_sol(self, store: bool = False) -> None:
         self.connect_seq(self.feed.F1, self.mix.F0, store=store)
-        self.mix._sol = self.mix.run_sol()
+        self.solve(self.mix)
         self.connect_seq(self.mix.F2, self.preheat.F0, store=store)
-        self.preheat._sol = self.preheat.run_sol()
+        self.solve(self.preheat)
         self.connect_seq(self.preheat.F1, self.reactor.F0, store=store)
-        self.reactor._sol = self.reactor.run_sol()
+        self.solve(self.reactor)
         self.connect_seq(self.reactor.F1, self.cond.F0, store=store)
         self.cond.seq_sol(store=store)
         self.connect_seq(self.cond.F1, self.split.F0, store=store)
-        self.split._sol = self.split.run_sol()
+        self.solve(self.split)
         self.connect_seq(self.split.F2, self.purge_out.F0, store=store)
         self.connect_seq(self.cond.F2, self.product.F0, store=store)
         if store:   # the recycle closes the loop (shown in the graph; converged by run_sol)
             self.connect_seq(self.split.F1, self.mix.F1, store=True)
 
-    def run_sol(self, eps=1e-9, max_iter=300, method='anderson'):
+    def run_sol(self, eps: float = 1e-9, max_iter: int = 300, method: str = 'anderson'):
         """Converge the recycle (tear stream: mixer inlet F1). Returns (passes, relative error of the tear stream)."""
         return self.Recycle_Tear(self.split.F1, self.mix.F1, flow_method='seq_sol', eps=eps, max_iter=max_iter,
                                  method=method)
 
     @property
-    def recycle_ratio(self):
+    def recycle_ratio(self) -> float:
         """Recycle flow per make-up gas flow [mol/mol]"""
         return self.split.F1.n/self.feed.F1.n
 
     @property
-    def carbon_efficiency(self):
+    def carbon_efficiency(self) -> float:
         """Carbon in the methanol of the crude product per carbon (CO + CO2) in the make-up gas [-]"""
         f, p = self.feed.F1, self.product.F0
         return p.n*p.Xi[6]/(f.n*(f.Xi[2] + f.Xi[3]))

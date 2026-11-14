@@ -245,6 +245,11 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
                 else:
                     setattr(pin2, var, getattr(pin1, var))
 
+    def solve(self, *units: ModelBase) -> None:
+        '''Run the solver of each unit and keep its result as ``unit._sol`` (read by ``get_success``).'''
+        for unit in units:
+            unit._sol = unit.run_sol()
+
     def getObjs(self) -> list[ModelBase]:
         """
         Get all objects added to the system.

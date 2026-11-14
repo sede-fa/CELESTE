@@ -1,9 +1,10 @@
 '''
 Flow related objects i.e. sources, sinks and pipes
 '''
-from . import interfaces, ModelBase
+from . import interfaces, ModelBase, media
 from .. import solvers
 import numpy as np
+from .._types import Array
 
 import numpy.typing as npt
 
@@ -12,7 +13,7 @@ class SourceM(ModelBase):
     '''
     1+nSpecies unknowns
     '''
-    def __init__(self, name, Medium, F1_n:float=1., F1_Xi:npt.NDArray[float] | None =None, F1_T:float=298.15, F1_P:float=1.):
+    def __init__(self, name: str, Medium: media.Medium_Base, F1_n:float=1., F1_Xi:npt.NDArray[float] | None =None, F1_T:float=298.15, F1_P:float=1.):
         super().__init__(locals())
         self.name = f'{name}(({name}))'
             
@@ -22,7 +23,7 @@ class Sink(ModelBase):
     '''
     2*(1+nSpecies) unknowns
     '''
-    def __init__(self, name, Medium, **legacy):
+    def __init__(self, name: str, Medium: media.Medium_Base, **legacy):
         super().__init__(locals())
 
         self.name = f'{name}[({name})]'
@@ -33,7 +34,7 @@ class Splitter(ModelBase):
     
     """Splits F0 into F1 (fraction ``Split``) and F2 (the rest) at the inlet state."""
 
-    def __init__(self, name, Medium, Split=0.5, **legacy):
+    def __init__(self, name: str, Medium: media.Medium_Base, Split: float = 0.5, **legacy):
         super().__init__(locals())
         self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
         self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
@@ -48,7 +49,7 @@ class Splitter(ModelBase):
         return self._split
 
     @split.setter
-    def split(self, val):
+    def split(self, val: float) -> None:
         self._split=val
         
     def Eqs(self):
@@ -58,11 +59,11 @@ class Splitter(ModelBase):
         self.F2.n = (1-self.split)*self.F0.n
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F2.n*self.F2.Ex - self.F1.n*self.F1.Ex 
     
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F2.s*self.F2.n + self.F1.s*self.F1.n - self.F0.s*self.F0.n
     
     def run_sol(self): 
@@ -74,7 +75,7 @@ class Mixer(ModelBase):
     
     """Adiabatic mixer of the feeds F0 and F1 into F2 at the pressure of F0."""
 
-    def __init__(self, name, Medium, **legacy):
+    def __init__(self, name: str, Medium: media.Medium_Base, **legacy):
         super().__init__(locals())
         self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
         self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
@@ -92,7 +93,7 @@ class Mixer(ModelBase):
         return self.Eq
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         return self.F2.h*self.F2.n - (self.F1.h*self.F1.n + self.F0.h*self.F0.n)
 
     @property  
@@ -100,10 +101,10 @@ class Mixer(ModelBase):
         return (self.F0.n*self.F0.Ex + self.F1.n*self.F1.Ex) - self.F2.n*self.F2.Ex 
     
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F2.s*self.F2.n - self.F1.s*self.F1.n - self.F0.s*self.F0.n 
     
-    def f_sol(self, x):
+    def f_sol(self, x: Array) -> Array:
         self.F2.T = x[0]
         return self.Eqs()
 

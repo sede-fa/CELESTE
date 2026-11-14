@@ -2,12 +2,13 @@
 Electrochemical reactors
 '''
 
-from . import interfaces, ModelBase
+from . import interfaces, ModelBase, media
 from . import equilibrium as eq
 from .exergy import T0
 from ..jx import nasa as _nasa
 from .. import solvers
 import numpy as np
+from .._types import Array
 from celeste import functions as funs
 
 F_CONST = 96485  #: Faraday constant used by the electrochemical models, C/mol
@@ -44,7 +45,7 @@ class _FuelStack(ModelBase):
     '''
     ELEMENTS = eq.FUEL_ELEMENTS                       # rows C, H, O, N
 
-    def __init__(self, name, MediumF, MediumA, T_in, P_in, T, Q, V_model, n_nodes, **params):
+    def __init__(self, name: str, MediumF: media.Medium_Base, MediumA: media.Medium_Base, T_in, P_in, T, Q, V_model, n_nodes, **params):
         if V_model not in ('mean', 'outlet', 'average', 'streams'):
             raise ValueError(f"{name}: V_model must be 'mean', 'outlet', 'average' or 'streams', not {V_model!r}")
         super().__init__(dict(name=name, V_model=V_model, n_nodes=n_nodes, **params))
@@ -63,47 +64,47 @@ class _FuelStack(ModelBase):
         return self.Q_spec is None
 
     @property
-    def T(self):
+    def T(self) -> float:
         '''Stack (outlet) temperature: the specified T, or the solved outlet temperature.'''
         return self.T_spec if self.isothermal else self.F1.T
 
     @T.setter
-    def T(self, value):
+    def T(self, value: float) -> None:
         '''Setting T makes the stack isothermal at T.'''
         self.T_spec, self.Q_spec = value, None
         self.Eqs, self.f_sol, self.n_unknowns = self.Eqs_T, self.f_sol_T, 6
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         '''Heat added to the stack [kJ/s] (net of Qloss).'''
         return self.F1.n*self.F1.h + self.A1.n*self.A1.h - self.F0.n*self.F0.h - self.A0.n*self.A0.h - self.W - self.Qloss
 
     @Q.setter
-    def Q(self, value):
+    def Q(self, value: float) -> None:
         '''Setting Q (0 for adiabatic) makes the outlet temperature follow from the energy balance.'''
         self.Q_spec, self.T_spec = value, None
         self.Eqs, self.f_sol, self.n_unknowns = self.Eqs_Q, self.f_sol_Q, 7
 
     @property
-    def P_soc(self):
+    def P_soc(self) -> float:
         return self.F1.P
 
     @property
-    def j(self):
+    def j(self) -> float:
         '''Current density through the electrolyte [A/cm2].'''
         return self.I_ion/(self.Ncells*self.cellArea)
 
     @j.setter
-    def j(self, value):
+    def j(self, value: float) -> None:
         self.I = self.I_from_j(value)
 
     @property
-    def xi_WGS(self):
+    def xi_WGS(self) -> float:
         '''Extent of the water-gas shift [mol/s] (CO2 formed).'''
         return self.F1.n*self.F1.Xi[2] - self.F0.n*self.F0.Xi[2]
 
     @property
-    def xi_MSR(self):
+    def xi_MSR(self) -> float:
         '''Extent of methane reforming [mol/s] (CH4 converted).'''
         return self.F0.n*self.F0.Xi[1] - self.F1.n*self.F1.Xi[1]
 
@@ -116,7 +117,7 @@ class _FuelStack(ModelBase):
         return -dG*1e3/(2*F_CONST)
 
     @property
-    def V_mean(self):
+    def V_mean(self) -> float:
         '''
         Nernst potential averaged over the charge passed [V] (Gauss-Legendre in lam, the fraction of the
         charge), with the fuel at equilibrium and T linear in lam from F0.T to F1.T.
@@ -133,52 +134,52 @@ class _FuelStack(ModelBase):
         return float(E)
 
     @property
-    def V_nernst_out(self):
+    def V_nernst_out(self) -> float:
         '''Nernst potential at the outlet [V].'''
         return float(self.nernst(self.F1.T, self.F1.P, *self.nernst_x(self.F1.Xi, self.A1.Xi)))
 
     @property
-    def V_nernst_in(self):
+    def V_nernst_in(self) -> float:
         '''Nernst potential of the inlet streams as fed [V].'''
         return float(self.nernst(self.F0.T, self.F0.P, *self.nernst_x(self.F0.Xi, self.A0.Xi)))
 
     @property
-    def V_average(self):
+    def V_average(self) -> float:
         '''Nernst potential at the mean of the inlet and outlet mole fractions, at the outlet temperature [V].'''
         x_in = self.nernst_x(self.F0.Xi, self.A0.Xi)
         x_out = self.nernst_x(self.F1.Xi, self.A1.Xi)
         return float(self.nernst(self.F1.T, self.F1.P, *(0.5*(np.array(x_in) + np.array(x_out)))))
 
     @property
-    def V_streams(self):
+    def V_streams(self) -> float:
         '''(G_out - G_in) per electron passed [V] of the streams; the former ideal voltage.'''
         dG = self.F1.n*self.F1.g + self.A1.n*self.A1.g - self.F0.n*self.F0.g - self.A0.n*self.A0.g
         return dG*1e3/(-self.I_ion)
 
     @property
-    def Vid(self):
+    def Vid(self) -> float:
         '''Ideal (reversible) cell voltage [V] of the chosen ``V_model``.'''
         return {'mean': lambda: self.V_mean, 'outlet': lambda: self.V_nernst_out,
                 'average': lambda: self.V_average, 'streams': lambda: self.V_streams}[self.V_model]()
 
     @property
-    def Wid(self):
+    def Wid(self) -> float:
         '''Ideal electrical work [kJ/s] (positive in electrolysis), from the ideal voltage.'''
         return -self.Vid*self.I_ion*1e-3
 
     @property
-    def ASR_mean(self):
+    def ASR_mean(self) -> float:
         '''ASR averaged over the charge passed [Ohm cm2]: T is linear in the charge (Gauss-Legendre average).'''
         nodes, weights = np.polynomial.legendre.leggauss(4)
         T = self.F0.T + 0.5*(nodes + 1)*(self.F1.T - self.F0.T)
         return float(0.5*np.dot(weights, [self.ASR(t) for t in T]))
 
     @property
-    def Vop(self):
+    def Vop(self) -> float:
         return self.Vid - self.f_ASR*self.ASR_mean*self.j
 
     @property
-    def W(self):
+    def W(self) -> float:
         return self.Vop*(-self.I)*self.Ncells*1e-3
 
     def heat_and_work(self) -> float:
@@ -187,31 +188,31 @@ class _FuelStack(ModelBase):
 
     # ---- second law ---------------------------------------------------------------------------------
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         # Q crosses the boundary at the stack temperature; Qloss at T0 and carries no exergy
         return self.Q*(1 - (T0/self.F1.T))
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.Ex*self.F0.n + self.A0.Ex*self.A0.n - self.F1.Ex*self.F1.n - self.A1.Ex*self.A1.n + self.W + self.Exth
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n + self.A1.s*self.A1.n - self.F0.s*self.F0.n - self.A0.s*self.A0.n - self.Q/self.F1.T - self.Qloss/T0
 
     # ---- performance --------------------------------------------------------------------------------
     @property
-    def EnthalpyEfficiency(self):
+    def EnthalpyEfficiency(self) -> float:
         '''Change of the fuel's lower heating value flow per electrical power (LHV at 25 degC from the medium).'''
         return (self.F1.n*self.F1.LHV - self.F0.n*self.F0.LHV)/self.W
 
     @property
-    def Lambda(self):
+    def Lambda(self) -> float:
         '''Air ratio: oxygen fed per oxygen consumed (fuel cell mode only).'''
         return self.A0.n*self.A0.Xi[0]/self.O2_consumed if self.I > 0 else np.nan
 
     @property
-    def AU(self):
+    def AU(self) -> float:
         '''Air utilisation: fraction of the inlet oxygen consumed.'''
         return 1 - (self.A1.Xi[0]*self.A1.n/self.A0.Xi[0]/self.A0.n)
 
@@ -221,12 +222,12 @@ class _FuelStack(ModelBase):
     def K_MSR(self):
         return eq.K_MSR(self.F1.T)
 
-    def cform(self, side='out'):
+    def cform(self, side: str = 'out'):
         f = self.F1 if side == 'out' else self.F0
         return funs.carbonFraction(f.T, f.P, dict(zip(f.Medium.species, f.Xi)))
 
     # ---- equations and solution ---------------------------------------------------------------------
-    def fuel_residuals(self, n, T, lam=1.0):
+    def fuel_residuals(self, n, T, lam: float = 1.0):
         '''Fuel-side equations (``eq.fuel_residuals``) after a fraction lam of the charge.'''
         return eq.fuel_residuals(n, self.F0.n*np.asarray(self.F0.Xi, dtype=float), T, self.F0.P, **self.fuel_transfer(lam))
 
@@ -288,7 +289,7 @@ class SOC(_FuelStack):
 
     Ports: F0 -> F1 (fuel side), A0 -> A1 (air side); outlets at the outlet temperature and inlet pressure.
     '''
-    def __init__(self, name, MediumF, MediumA, Tsoc0=None, Tsoc1=None, I:float=0.0, cellArea:float=100.,
+    def __init__(self, name: str, MediumF: media.Medium_Base, MediumA: media.Medium_Base, Tsoc0=None, Tsoc1=None, I:float=0.0, cellArea:float=100.,
                  Ncells:int|float=1, f_ASR:float=1., extent=None, Qloss:float=0.0, *, T:float|None=None,
                  Q:float|None=None, V_model:str='mean', n_nodes:int=12, T_soc0=None, T_soc1=None, P_soc=None):
         T, T_in, P_in = _stack_legacy_inputs('SOC', 1073.15, T, Q, Tsoc0, T_soc0, Tsoc1, T_soc1, P_soc, extent)
@@ -296,16 +297,16 @@ class SOC(_FuelStack):
                          I=I, cellArea=cellArea, Ncells=Ncells, f_ASR=f_ASR, Qloss=Qloss)
 
     @property
-    def n_O(self):
+    def n_O(self) -> float:
         '''Oxygen ions transferred to the fuel side [mol/s] (negative in electrolysis).'''
         return self.Ncells*self.I/2/F_CONST
 
     @property
-    def I_ion(self):
+    def I_ion(self) -> float:
         return self.Ncells*self.I
 
     @property
-    def O2_consumed(self):
+    def O2_consumed(self) -> float:
         return 0.5*self.n_O
 
     def I_from_j(self, j):
@@ -329,7 +330,7 @@ class SOC(_FuelStack):
         return 7.28e2*np.exp(-8.29e-3*(T - 273.15))
 
     @property
-    def RC(self):
+    def RC(self) -> float:
         if self.I<0:
             val=-self.Ncells*self.I/(F_CONST*(self.F0.n*(2*self.F0.Xi[2] + 2*self.F0.Xi[4])))
         else:
@@ -337,14 +338,14 @@ class SOC(_FuelStack):
         return val
 
     @property
-    def RC_EC(self):
+    def RC_EC(self) -> float:
         return (self.F0.n*(self.F0.Xi[2] + self.F0.Xi[4]) - self.F1.n*(self.F1.Xi[2] + self.F1.Xi[4]))/(
                 self.F0.n*(self.F0.Xi[2] + self.F0.Xi[4]))
 
 
 class SOC_Nernst_avg(SOC):
     '''SOC with the Nernst potential at the mean inlet/outlet mole fractions (``V_model='average'``).'''
-    def __init__(self, *args, V_model='average', **kwargs):
+    def __init__(self, *args, V_model: str = 'average', **kwargs):
         super().__init__(*args, V_model=V_model, **kwargs)
 
 
@@ -369,7 +370,7 @@ class PCC(_FuelStack):
         V_model:   'mean', 'outlet', 'average' or 'streams'
     Deprecated: Tpcc0 (set F0.T, A0.T), Tpcc1 (use T), extent (no effect).
     '''
-    def __init__(self, name, Tpcc0=None, Tpcc1=None, I:float=1., cellArea:float=100000., Ncells:int|float=1,
+    def __init__(self, name: str, Tpcc0=None, Tpcc1=None, I:float=1., cellArea:float=100000., Ncells:int|float=1,
                  f_ASR:float=1., extent=None, Qloss:float=0., EffFar:float=1., *, T:float|None=None, Q:float|None=None,
                  V_model:str='mean', n_nodes:int=12, asr_choice:int=1):
         from . import media
@@ -378,20 +379,20 @@ class PCC(_FuelStack):
                          cellArea=cellArea, Ncells=Ncells, f_ASR=f_ASR, Qloss=Qloss, EffFar=EffFar, asr_choice=asr_choice)
 
     @property
-    def P_pcc(self):
+    def P_pcc(self) -> float:
         return self.F1.P
 
     @property
-    def n_H(self):
+    def n_H(self) -> float:
         '''Protons transferred from the fuel to the air side [mol/s] (negative in electrolysis).'''
         return self.Ncells*self.I*self.EffFar/F_CONST if self.I < 0 else self.Ncells*self.I/self.EffFar/F_CONST
 
     @property
-    def I_ion(self):
+    def I_ion(self) -> float:
         return self.n_H*F_CONST
 
     @property
-    def O2_consumed(self):
+    def O2_consumed(self) -> float:
         return 0.25*self.n_H
 
     def I_from_j(self, j):
@@ -435,7 +436,7 @@ class PCC(_FuelStack):
         raise ValueError(f'{self.name}: asr_choice must be 0 to 4')
 
     @property
-    def RC(self):
+    def RC(self) -> float:
         if self.I < 0:
             return -self.Ncells*self.I*self.EffFar/(F_CONST*self.F0.n*2*self.F0.Xi[4])
         return self.Ncells*self.I/self.EffFar/(2*F_CONST*self.F0.n*(self.F0.Xi[0] + 4*self.F0.Xi[1] + self.F0.Xi[3]))
@@ -447,13 +448,13 @@ class PCC_base(PCC):
 
 class PCC_delG(PCC):
     '''PCC with the Gibbs energy difference of the streams as ideal voltage (``V_model='streams'``).'''
-    def __init__(self, *args, V_model='streams', **kwargs):
+    def __init__(self, *args, V_model: str = 'streams', **kwargs):
         super().__init__(*args, V_model=V_model, **kwargs)
 
 
 class PCC_Nernst_avg(PCC):
     '''PCC with the Nernst potential at the mean inlet/outlet mole fractions (``V_model='average'``).'''
-    def __init__(self, *args, V_model='average', **kwargs):
+    def __init__(self, *args, V_model: str = 'average', **kwargs):
         super().__init__(*args, V_model=V_model, **kwargs)
 
 
@@ -494,10 +495,10 @@ class AEL(ModelBase):
 
     Ports: F0 (water in) -> F1 (hydrogen side out), F2 (oxygen out)
     '''
-    def __init__(self, name, Medium, T=298.15, P=1, j=-0.32, Ncells=None, A=None,
-                 F0_n=1, F0_Xi=np.array([1, 0, 0, 0]), 
-                 F1_n=1, F1_Xi=None, #['H2O(L)', 'H2', 'O2', 'H2O']
-                 F2_n=1, F2_Xi=np.array([0, 0, 1, 0]) 
+    def __init__(self, name: str, Medium: media.Medium_Base, T: float = 298.15, P: int = 1, j: float = -0.32, Ncells=None, A=None,
+                 F0_n: int = 1, F0_Xi=np.array([1, 0, 0, 0]), 
+                 F1_n: int = 1, F1_Xi=None, #['H2O(L)', 'H2', 'O2', 'H2O']
+                 F2_n: int = 1, F2_Xi=np.array([0, 0, 1, 0]) 
                 ): 
                 
         '''
@@ -532,42 +533,42 @@ class AEL(ModelBase):
         return self.Eq
 
     @property
-    def j(self):
+    def j(self) -> float:
         return self._j
     
     @j.setter
-    def j(self, val):
+    def j(self, val: float) -> None:
         self._j = val
     
     @property
-    def I(self):
+    def I(self) -> float:
         return self.j*self.A
     
     @property
-    def Vop(self):
+    def Vop(self) -> float:
         return 1.481 + 2.9*1e-3*self.F0.P - self.j*1.05
 
     @property
-    def W(self):
+    def W(self) -> float:
         return -self.I*self.Vop*self.Ncells*1e-3 # to kJ/s
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         return self.F2.n*self.F2.h + self.F1.n*self.F1.h - self.F0.n*self.F0.h - self.W
     
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - 298.15/self.F1.T)
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth + self.W
     
     @property
-    def Exeff(self):
+    def Exeff(self) -> float:
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.max([0, self.Exth]) +  self.W)
         
-    def f_sol(self, x):
+    def f_sol(self, x: Array) -> Array:
         self.j = x[0]
         self.F1.n = x[1]
         self.F1.Xi = np.array([0, x[2], 0.001, 0.002])

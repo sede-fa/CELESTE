@@ -221,15 +221,15 @@ class Compressor(_RealGasPath, ModelBase):
         self._init_state(legacy)
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.W
 
     @property
-    def Exeff(self):
+    def Exeff(self) -> float:
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.W)
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n
 
     def run_sol(self):
@@ -252,7 +252,7 @@ class CompIsent(Compressor):
         self._path(self.eff)
 
     @property
-    def W(self):
+    def W(self) -> float:
         return self.F0.n*(self.F1.h - self.F0.h)
 
 
@@ -292,23 +292,23 @@ class CompIsot(Compressor):
         self.F1.T = self.F0.T
 
     @property
-    def W(self):
+    def W(self) -> float:
         return self.F0.n*self.F0.T*self.R*np.log(self.F1.P/self.F0.P)/self.eff
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         return -self.W
 
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - 298.15/self.F0.T)
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return super().Exloss + self.Exth
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return super().Sgen - self.Q/self.F0.T
 
 
@@ -360,7 +360,7 @@ class CompressorMapped(_MappedMixin, Compressor):
         Shaft torque / Nm, set in ``Eqs``. NaN if ``omega`` is zero.
     """
     def __init__(self, name: str, comp_map: CompressorMap, Medium: media.Medium_Base,
-                 PR: float = 1., eta: float = 0.9, Ncorr=1., beta=0.5, Ndesign=0.,
+                 PR: float = 1., eta: float = 0.9, Ncorr: float = 1., beta: float = 0.5, Ndesign: float = 0.,
                  etaMech: float = 1., use_map: bool = False, **legacy):
         super().__init__(name, Medium=Medium, eff=eta, **legacy)
 
@@ -497,7 +497,7 @@ class TurbineMapped(_MappedMixin, Turbine):
         Shaft torque / Nm, set in ``Eqs``. NaN if ``omega`` is zero.
     """
     def __init__(self, name: str, turb_map: TurbineMap, Medium: media.Medium_Base,
-                 PR: float = 1., eta: float = 1., Ncorr=1., beta=0.5, Ndesign=0., etaMech: float = 1.,
+                 PR: float = 1., eta: float = 1., Ncorr: float = 1., beta: float = 0.5, Ndesign: float = 0., etaMech: float = 1.,
                  Mach_out: float = 0.2, A_exit: float = None, blockage: float = 0.03,
                  use_map: bool = True, **legacy):
         super().__init__(name, Medium=Medium, **legacy)
@@ -600,7 +600,7 @@ class TurbineMapped(_MappedMixin, Turbine):
         self.tau = self.Pshaft/self.omega if self.omega > 0 else np.nan
 
     def solve_design_PR(self, Pshaft_target: float,
-                        PR_bounds=(1.001, 50.), xtol=1e-12, verbose: int = 0):
+                        PR_bounds=(1.001, 50.), xtol: float = 1e-12, verbose: int = 0):
         """
         Find the pressure ratio that delivers a target shaft power.
 

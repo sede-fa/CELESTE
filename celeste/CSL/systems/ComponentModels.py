@@ -6,6 +6,7 @@ Small reusable systems built from the component models.
 3. Ncomp:               N-stage compression with inter- and after-cooling (a reusable "box")
 """
 import numpy as np
+from collections.abc import Sequence
 
 from celeste.CSL import interfaces, media, heat, flow, components, turbomachinery, SysBase
 
@@ -18,7 +19,7 @@ class SimpleHeaterSys(SysBase):
         sys.run_sol()
         sys.heater.Q        # heat duty in kJ/s
     """
-    def __init__(self, name, flow_in, Xi_in, T_in, P_in, T_out):
+    def __init__(self, name: str, flow_in, Xi_in, T_in, P_in, T_out):
         super().__init__(locals())
         ## initialise components with fixed parameters
         self.source = flow.SourceM(name + '.source', media.Air(), flow_in, Xi_in, T_in, P_in)
@@ -26,9 +27,9 @@ class SimpleHeaterSys(SysBase):
         self.heater.F1.T = T_out
         self.sink = flow.Sink(name + '.sink', media.Air())
 
-    def seq_sol(self, store=False):
+    def seq_sol(self, store: bool = False) -> None:
         self.connect_seq(self.source.F1, self.heater.F0, store=store) # feed Heater inlet flow
-        self.heater._sol = self.heater.run_sol() # run internal solver in heater model
+        self.solve(self.heater)
         self.connect_seq(self.heater.F1, self.sink.F0, store=store) # feed sink inlet flow
 
 class SimpleCompressorSys(SysBase):
@@ -41,7 +42,7 @@ class SimpleCompressorSys(SysBase):
         sys.run_sol()
         sys.compressor.W    # shaft work in kJ/s
     """
-    def __init__(self, name, flow_in, Xi_in, T_in, P_in, P_out, eff=1., compressor=None):
+    def __init__(self, name: str, flow_in, Xi_in, T_in, P_in, P_out, eff: float = 1., compressor=None):
         super().__init__(locals())
         ## initialise components with fixed parameters
         self.source = flow.SourceM(name + '.source', media.Air(), flow_in, Xi_in, T_in, P_in)
@@ -49,9 +50,9 @@ class SimpleCompressorSys(SysBase):
         self.compressor.F1.P = P_out
         self.sink = flow.Sink(name + '.sink', media.Air())
 
-    def seq_sol(self, store=False):
+    def seq_sol(self, store: bool = False) -> None:
         self.connect_seq(self.source.F1, self.compressor.F0, store=store) # feed Compressor inlet flow
-        self.compressor._sol = self.compressor.run_sol() # run internal solver in compressor model
+        self.solve(self.compressor)
         self.connect_seq(self.compressor.F1, self.sink.F0, store=store) # feed sink inlet flow
 
 class Ncomp(SysBase):
@@ -71,8 +72,8 @@ class Ncomp(SysBase):
                      (a mapped compressor: ``lambda name, Medium, eff: CompressorMapped(name, cmap, Medium, eta=eff)``)
     '''
 
-    def __init__(self, name, Medium, n=1., Xi=None, T_in=400, P_in=1., N_stage=2, eff_comp=0.7, P_comp=(2., 3.),
-                 T_HT=350., compressor=None, P_out=None):
+    def __init__(self, name: str, Medium: media.Medium_Base, n: float = 1., Xi=None, T_in: int = 400, P_in: float = 1., N_stage: int = 2, eff_comp: float | Sequence[float] = 0.7, P_comp: Sequence[float] = (2., 3.),
+                 T_HT: float | Sequence[float] = 350., compressor=None, P_out: float | None = None):
         super().__init__(dict(name=name, Medium=Medium, n=n, Xi=Xi, T_in=T_in, P_in=P_in, N_stage=N_stage,
                               eff_comp=eff_comp, P_comp=P_comp, T_HT=T_HT, P_out=P_out))
         if N_stage < 2:
@@ -94,7 +95,7 @@ class Ncomp(SysBase):
             self.add_stage(eff[i], P_comp[i], T_HT[i], comp_cls[i])
 
     @staticmethod
-    def _per_stage(value, N, label):
+    def _per_stage(value, N: int, label: str) -> list:
         '''One value for every stage, or a list with one value per stage.'''
         if isinstance(value, (list, tuple, np.ndarray)):
             if len(value) != N:
@@ -116,14 +117,14 @@ class Ncomp(SysBase):
         setattr(self, f"HT{self.N}", heater)
         self.getObjs()
 
-    def seq_sol(self, store=False):
+    def seq_sol(self, store: bool = False) -> None:
         current_flow = self.F0
         for idx, (comp, heater) in enumerate(zip(self.compressors, self.heaters)):
             self.connect_seq(current_flow, comp.F0, store=store)
-            comp._sol = comp.run_sol()
+            self.solve(comp)
             
             self.connect_seq(comp.F1, heater.F0, store=store)
-            heater._sol = heater.run_sol()
+            self.solve(heater)
             
             current_flow = heater.F1
             if idx == self.N - 1:  # Final connection

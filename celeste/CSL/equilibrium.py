@@ -84,7 +84,7 @@ FUEL_ELEMENTS = np.array([[0, 1, 1, 1, 0, 0],
                           [0, 0, 0, 0, 0, 2]])
 
 
-def fuel_residuals(n, n0, T, P, O_in=0.0, H_in=0.0):
+def fuel_residuals(n, n0, T, P, O_in: float = 0.0, H_in: float = 0.0):
     """
     Equations of a fuel-side stream (H2, CH4, CO2, CO, H2O, N2) at shift and reforming equilibrium:
     the C, H, O, N balances between the inlet flows ``n0`` and the outlet flows ``n`` (relative to the

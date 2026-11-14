@@ -1,4 +1,5 @@
 import numpy as np
+from .._types import Array
 from numpy.typing import NDArray as npArray
 from . import ModelBase, interfaces, media
 from .. import solvers
@@ -17,23 +18,23 @@ class GPUbase(ModelBase):
       energy balance closes (``heat_and_work()`` = W + Q_amb). It is not reported as process heat.
     * ``Exloss`` = exergy in + W - exergy out, ``Sgen`` = ΔS - Q_amb/T0, so Exloss = T0·Sgen.
     """
-    def __init__(self, name, eff, args):
+    def __init__(self, name: str, eff, args):
         params = {k: v for k, v in dict(args).items() if k not in ('self', '__class__', 'legacy')}
         super().__init__({**params, 'name': name, 'eff': eff})
 
     @property
-    def Wid(self):
+    def Wid(self) -> float:
         return sum(f.n*f.Ex for f in self.outlets) - sum(f.n*f.Ex for f in self.inlets)
 
     @property
-    def W(self):
+    def W(self) -> float:
         if self.eff == 0:
             return 0.
         Wid = self.Wid
         return float(Wid/self.eff if Wid > 0 else Wid*self.eff)
 
     @property
-    def Q_amb(self):
+    def Q_amb(self) -> float:
         """Heat exchanged with the surroundings at T0 (positive into the unit), kJ/s."""
         dH = sum(f.n*f.h for f in self.outlets) - sum(f.n*f.h for f in self.inlets)
         return dH - self.W
@@ -42,11 +43,11 @@ class GPUbase(ModelBase):
         return float(self.W + self.Q_amb)
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return sum(f.n*f.Ex for f in self.inlets) + self.W - sum(f.n*f.Ex for f in self.outlets)
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         from .exergy import T0
         dS = sum(f.n*f.s for f in self.outlets) - sum(f.n*f.s for f in self.inlets)
         return dS - self.Q_amb/T0
@@ -159,7 +160,7 @@ class GPU_2S(GPU_2SV2):
     Example (water removal):
         gpu = components.GPU_2S('dryer', media.Fuel_CH4(), idxSep=4, eff=0.7)
     """
-    def __init__(self, name, Medium, idxSep=4, eff=1, **legacy):
+    def __init__(self, name: str, Medium: media.Medium_Base, idxSep: int = 4, eff: int = 1, **legacy):
         Sep = np.ones(len(Medium.species))
         Sep[idxSep] = 0.0
         super().__init__(name, Medium, Sep=Sep, eff=eff, **legacy)
@@ -275,7 +276,7 @@ class ASU(ModelBase):
         self.W = self.Power*self.F1.m*3600*1e-6 # kJ/s 
     
     @property
-    def Q(self):
+    def Q(self) -> float:
         return -self.W
         
     @deprecated('use MBcheck()')
@@ -283,15 +284,15 @@ class ASU(ModelBase):
         return self.MBcheck()
 
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - (298.15/self.F1.T))
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.W + self.Exth
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n + self.F2.s*self.F2.n - self.F0.s*self.F0.n - self.Q/self.F1.T
 
     def run_sol(self):
@@ -354,11 +355,11 @@ class Pump(ModelBase):
         return self.Eq
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         return self.F1.n*self.F1.h - (self.W + self.F0.n*self.F0.h) 
 
     @property
-    def W(self):
+    def W(self) -> float:
         if self.F1.P > self.F0.P:
             eff_ratio = 1/self.eff
         else:
@@ -366,19 +367,19 @@ class Pump(ModelBase):
         return (self.F0.m*1e-1*(self.F1.P - self.F0.P)/self.F0.Medium.rho)*eff_ratio
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.W 
 
     @property
-    def Exeff(self):
+    def Exeff(self) -> float:
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.W)
     
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         # taking out the pressure change in the entropy calculation
         return self.F1.n*self.F1.s- self.F0.n*self.F0.s 
     
-    def f_sol(self, x):
+    def f_sol(self, x: Array) -> Array:
         self.F1.T = x[0]
         return self.Eqs()
         
@@ -438,15 +439,15 @@ class Valve(ModelBase):
         return solvers.solve_scalar(self._dh, max(1.0, T0 - 150.0), T0 + 150.0, x0=T0, name=self.name)
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex
 
     @property
-    def Exeff(self):
+    def Exeff(self) -> float:
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex)
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n
 
 
@@ -510,11 +511,11 @@ class DAC(ModelBase):
         self.F2.Xi = np.array([0., 0., 1.0])
 
     @property
-    def W(self): 
+    def W(self) -> float: 
         return self.Power_el*self.F2.m*3600*1e-6 # kJ/s 
     
     @property
-    def Q(self):
+    def Q(self) -> float:
         return self.Power_th*self.F2.m*3600*1e-6
         
     @deprecated('use MBcheck()')
@@ -522,15 +523,15 @@ class DAC(ModelBase):
         return self.MBcheck()
 
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - (298.15/self.F2.T))
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.W + self.Exth
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n + self.F2.s*self.F2.n - self.F0.s*self.F0.n - self.Q/self.F2.T
 
     def run_sol(self):
@@ -576,18 +577,18 @@ class ChgMedium(ModelBase):
         self.F1.P = self.F0.P
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n
 
     def run_sol(self):
         self.Eqs()
 
 
-def __getattr__(name):
+def __getattr__(name: str):
     # the compressor models live in celeste.CSL.turbomachinery; the old names keep working
     if name in ('Compressor', 'CompIsot', 'CompIsent', 'CompPolytropic'):
         from . import turbomachinery

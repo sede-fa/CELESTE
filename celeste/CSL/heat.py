@@ -77,19 +77,19 @@ class HexBase(ModelBase):
         return 0.0
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         return self.epsilon*self.Qmax
     
     @property
-    def QmaxH(self):
+    def QmaxH(self) -> float:
         return self.H0.n*(self.H0.h - self.__H0.h)
     
     @property
-    def QmaxC(self):
+    def QmaxC(self) -> float:
         return self.C0.n*(self.C0.h - self.__C0.h)
 
     @property
-    def Qmax(self):
+    def Qmax(self) -> float:
         return self.Cmin*(self.H0.T-self.C0.T)
     
     @property
@@ -109,19 +109,19 @@ class HexBase(ModelBase):
         return C
     
     @property
-    def Cr(self):
+    def Cr(self) -> float:
         return self.Cmin/self.Cmax
     
     @property
-    def epsilon(self):
+    def epsilon(self) -> float:
         return -1.
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.H0.n*(self.H0.Ex - self.H1.Ex) + self.C0.n*(self.C0.Ex - self.C1.Ex)
     
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.H0.n*(self.H1.s - self.H0.s) + self.C0.n*(self.C1.s - self.C0.s)
     
     def f_sol(self, x:npArray[np.float64]) -> npArray[np.float64]:
@@ -177,7 +177,7 @@ class HexNTU(HexBase):
         self.eps_targ: float
 
     @property
-    def NTU(self):
+    def NTU(self) -> float:
         return self.UA*1e-3/self.Cmin
     
     @property
@@ -323,11 +323,11 @@ class Heater(ModelBase):
         self.F1.P = self.F0.P
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         return (self.F1.n*self.F1.h - self.F0.n*self.F0.h)
     
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         if self.Q < 0:
             th = self.Q*(1-298.15/self.F1.T) 
         else:
@@ -335,11 +335,11 @@ class Heater(ModelBase):
         return th
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.Ex*self.F0.n - self.F1.Ex*self.F1.n + self.Exth
     
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         if self.Q < 0:
             sb = self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F1.T 
         else:
@@ -350,3 +350,10 @@ class Heater(ModelBase):
     def run_sol(self):
         # forward run
         self.Eqs()
+
+
+def heater_to(name: str, Medium: media.Medium_Base, T, P, MediumOut=None):
+    """A ``Heater`` (or cooler) from ``Medium`` to ``MediumOut`` (default the same) whose outlet is at T [K] and P [bar]."""
+    unit = Heater(name, Medium0=Medium, Medium1=MediumOut or Medium)
+    unit.F1.T, unit.F1.P = T, P
+    return unit

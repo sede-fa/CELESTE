@@ -11,6 +11,7 @@ Reactors models
 """
 
 import numpy as np
+from .._types import Array
 from numpy.typing import NDArray as npArray
 import scipy.optimize as spo
 
@@ -47,22 +48,22 @@ class EquilBase(ModelBase):
         self._T = T
 
     @property
-    def P(self):
+    def P(self) -> float:
         return self._P
 
     @P.setter
-    def P(self, P_):
+    def P(self, P_: float) -> None:
         self.__dict__['P'] = P_
         self._P = P_
         self.F0.P = P_
         self.F1.P = P_   
 
     @property
-    def T(self):
+    def T(self) -> float:
         return self._T
 
     @T.setter
-    def T(self, T_):
+    def T(self, T_: float) -> None:
         self.__dict__['T'] = T_
         self._T = T_
         self.F0.T = T_
@@ -72,19 +73,19 @@ class EquilBase(ModelBase):
         return ((1000/self.F1.T)-1)
 
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - (298.15/self.F1.T))
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
 
     @property
-    def Exeff(self):
+    def Exeff(self) -> float:
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F0.T
 
     @deprecated('Exth, Exloss and Exeff are properties now and need no update call', removal=None)
@@ -120,7 +121,7 @@ class ExtentReactor(ModelBase):
     """
     reactions: dict = {}
 
-    def __init__(self, name, Medium, T=None, Q=None, dP=0.0):
+    def __init__(self, name: str, Medium: media.Medium_Base, T=None, Q=None, dP: float = 0.0):
         if T is not None and Q is not None:
             raise ValueError(f"{name}: give either T (isothermal) or Q (heat duty), not both")
         ModelBase.__init__(self, dict(name=name, Medium=Medium, dP=dP))
@@ -140,23 +141,23 @@ class ExtentReactor(ModelBase):
         return self.Q_spec is None
 
     @property
-    def T(self):
+    def T(self) -> float:
         '''Reactor temperature: the specified T, or the outlet temperature.'''
         return self.T_spec if self.T_spec is not None else self.F1.T
 
     @T.setter
-    def T(self, value):
+    def T(self, value: float) -> None:
         '''Setting T makes the reactor isothermal at T.'''
         self.T_spec, self.Q_spec = value, None
         self._select_mode()
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         '''Heat added to the reactor [kJ/s].'''
         return self.F1.n*self.F1.h - self.F0.n*self.F0.h
 
     @Q.setter
-    def Q(self, value):
+    def Q(self, value: float) -> None:
         '''Setting Q (0 for adiabatic) makes the outlet temperature follow from the energy balance.'''
         self.Q_spec, self.T_spec = value, None
         self._select_mode()
@@ -171,19 +172,19 @@ class ExtentReactor(ModelBase):
 
     # ---- balances -----------------------------------------------------------------------------------
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - 298.15/self.F1.T) if not (self.Q_spec == 0) else 0.0
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
 
     @property
-    def Exeff(self):
+    def Exeff(self) -> float:
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F1.T
 
     @deprecated('Exth, Exloss and Exeff are properties now and need no update call', removal=None)
@@ -454,16 +455,16 @@ class HB(ExtentReactor):
         return np.array([lo[0] + 0.3*(hi[0] - lo[0])])
 
     @property
-    def conversion(self):
+    def conversion(self) -> float:
         '''Hydrogen conversion [-].'''
         return (self.F0.Xi[0]*self.F0.n - self.F1.Xi[0]*self.F1.n)/(self.F0.Xi[0]*self.F0.n)
 
     @property
-    def tau0(self):
+    def tau0(self) -> float:
         return self.F0.P*self.Vol*1e3/0.08314/self.F0.T/self.F0.n
 
     @property
-    def tau1(self):
+    def tau1(self) -> float:
         return self.F1.P*self.Vol*1e3/0.08314/self.F1.T/self.F1.n
 
     @staticmethod
@@ -512,7 +513,7 @@ class HB_Adiabatic(HB):
     Adiabatic Haber-Bosch reactor - former class, now ``HB(..., Q=0)``.
     The former outlet pressure ``F1_P`` becomes the pressure drop ``dP = F0_P - F1_P``.
     """
-    def __init__(self, name:str, Medium:media.Medium_Base=media.HB(), AF=1.0, Vol:float=1.0, r_type:bool=True,
+    def __init__(self, name:str, Medium:media.Medium_Base=media.HB(), AF: float = 1.0, Vol:float=1.0, r_type:bool=True,
                  P:float|None=None, F0_P:float=200.0, F1_P:float|None=None, F1_T=None, **legacy):
         from .._deprecation import warn_deprecated
         warn_deprecated("HB_Adiabatic is deprecated: use HB(name, Medium, Vol=..., Q=0)", stacklevel=3)
@@ -610,24 +611,24 @@ class HB_1D(ModelBase):
         return sol
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         '''Heat added through the wall [kJ/s].'''
         return self.F1.n*self.F1.h - self.F0.n*self.F0.h
 
     @property
-    def conversion(self):
+    def conversion(self) -> float:
         return (self.F0.Xi[0]*self.F0.n - self.F1.Xi[0]*self.F1.n)/(self.F0.Xi[0]*self.F0.n)
 
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         return self.Q*(1 - 298.15/self.T_wall)
 
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.T_wall
 
 
@@ -748,7 +749,7 @@ class MeOH(ExtentReactor):
 
     # ---- results ------------------------------------------------------------------------------------
     @property
-    def conversion(self):
+    def conversion(self) -> float:
         i, f0, f1 = self._i, self.F0, self.F1
         c_in = f0.n*(f0.Xi[i['CO2']] + f0.Xi[i['CO']])
         c_out = f1.n*(f1.Xi[i['CO2']] + f1.Xi[i['CO']])
@@ -763,7 +764,7 @@ class MeOH(ExtentReactor):
         return MB
 
 
-def _former_meoh(model, adiabatic=False):
+def _former_meoh(model, adiabatic: bool = False):
     def init(self, name:str, Medium:media.Medium_Base=media.Fuel_MeOH(), Yield:float=0.35, M_cat:float|None=None,
              T:float=473.15, P:float=50.0, Q:float=0.0, F0_n:float=1.0, F0_Xi=None, F1_n=None, F1_Xi=None):
         from .._deprecation import warn_deprecated
@@ -802,8 +803,8 @@ class Reformer(ModelBase):
     '''
     Medium = media.media_C3()
     '''
-    def __init__(self, name, Medium, F0_n=1., F0_Xi=1., F1_n=1., F1_Xi=None, T=500., P=1., V=1., por=0.75, A = [17400., 23950., 5000.], 
-                 Ea = [103191., 0.82*231266., 159241.], beta3=-1, alpha3=2.8, Twall=1000., UA=1e-3):
+    def __init__(self, name: str, Medium: media.Medium_Base, F0_n: float = 1., F0_Xi: float = 1., F1_n: float = 1., F1_Xi=None, T: float = 500., P: float = 1., V: float = 1., por: float = 0.75, A = [17400., 23950., 5000.], 
+                 Ea = [103191., 0.82*231266., 159241.], beta3: int = -1, alpha3: float = 2.8, Twall: float = 1000., UA: float = 1e-3):
         
         super().__init__(locals())
         
@@ -838,7 +839,7 @@ class Reformer(ModelBase):
         X = (self.F1.Xi*self.F1.n - self.F0.Xi*self.F0.n)/(self.F0.Xi*self.F0.n)
         return X
     
-    def MBcheck(self):
+    def MBcheck(self) -> float:
         return self.F0.n*self.F0.mw/(self.F1.n*self.F1.mw) 
     
     def K_PSR(self):
@@ -856,7 +857,7 @@ class Reformer(ModelBase):
     def Eq_WGS(self):
         return self.Q_WGS()/self.K_WGS()
     
-    def f_sol(self, x):
+    def f_sol(self, x: Array) -> Array:
         self.F1.n = x[0]
         self.F1.T = x[1]
         self.F1.Xi = x[2:]
@@ -877,8 +878,8 @@ class Reformer_1D(SysBase):
     '''
     Medium = media.media_C3()
     '''
-    def __init__(self, name, Medium, F0_n=1., F0_Xi=1., T=500., P=1., V=1., N=10, por=0.75, A = [17400., 23950., 5000.], 
-                 Ea = [103191., 0.82*231266., 159241.], beta3=-1, alpha3=2.8, Twall=1000., UA=1e-3):
+    def __init__(self, name: str, Medium: media.Medium_Base, F0_n: float = 1., F0_Xi: float = 1., T: float = 500., P: float = 1., V: float = 1., N: int = 10, por: float = 0.75, A = [17400., 23950., 5000.], 
+                 Ea = [103191., 0.82*231266., 159241.], beta3: int = -1, alpha3: float = 2.8, Twall: float = 1000., UA: float = 1e-3):
         super().__init__(locals())
         self.Refs = np.array([Reformer(f'{name}[{i}]', Medium=Medium, F0_n = F0_n, F0_Xi=F0_Xi, F1_n=F0_n, F1_Xi=F0_Xi, 
                                        T=T, P=P, V=V/N, por=por, A = A, Ea = Ea, Twall=Twall, UA=UA, beta3=beta3, alpha3=alpha3) for i in range(N)], 
