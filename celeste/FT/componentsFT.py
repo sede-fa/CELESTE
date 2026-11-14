@@ -1,8 +1,9 @@
 import numpy as np
 import scipy.optimize as spo
 
-from ..CSL import interfaces, media, ModelBase, components as comp
-from . import interfacesFT as interFT, mediaFT
+from ..CSL import interfaces, media, ModelBase, components as comp, turbomachinery
+from .. import solvers
+from . import interfacesFT as interFT, mediaFT, thermoFT
 
 from numpy.typing import NDArray as npArray
 from typing import Literal
@@ -360,9 +361,9 @@ class GPU_3S(comp.GPUbase):
         self.sep = sep
         
     def Eqs(self):
-        idx:npArray[np.int] = np.where(self.sep == -1)
-        sep1:npArray[np.float64] = np.where(self.sep >= 0, self.sep, 0)
-        self.F3.n = float(self.F0.n*self.F0.Xi[idx])
+        idx = np.flatnonzero(np.asarray(self.sep) == -1)
+        sep1:npArray[np.float64] = np.where(self.sep >= 0, self.sep, 0).astype(float)
+        self.F3.n = float(self.F0.n*self.F0.Xi[idx[0]])
         self.F1.n = np.sum(self.F0.n*self.F0.Xi*sep1)
         self.F1.Xi = self.F0.n*self.F0.Xi*sep1/self.F1.n
         self.F2.n = self.F0.n - self.F1.n - self.F3.n
@@ -393,56 +394,23 @@ class GPU_3S(comp.GPUbase):
         sol = spo.least_squares(self.f_sol, x0)
         return sol   
     
-class ChgMedium(ModelBase):
+class ChgMedium(comp.ChgMedium):
     '''
-    class that changes the medium of a given flange. if using media than don't add a a phase. If using mediaFT then add a phase
-    Input:
-    F0_n: inlet mol flow
-    F0_Xi: inlet molar composition
-    F0_T: the inlet temperature in K
-    F1_T: must be the same temperature as the inlet
-    F0_P: the inlet pressure in bar
-    F1_P: must be the same pressure as the inlet
-    Medium0: the inlet Medium. Default 'media.Fuel_CH4()'
-    Medium1: the outlet wanted Medium. Default 'Syncrude()'
-    phase0: the inlet phase. Default 'Gas'
-    phase1: the outlet phase. Default 'Gas'. must be the same phase as the inlet
+    ChgMedium of the standard library with FT defaults: inlet media.Fuel_CH4(), outlet mediaFT.Syncrude().
+    Give phase0 / phase1 to use FT flanges (with a phase) on that side.
     '''
-    def __init__(self, name:str, Medium0:media.Medium_Base=media.Fuel_CH4(), Medium1:media.Medium_Base=mediaFT.Syncrude(), phase0:Literal['Gas', 'Liquid', None]=None, 
-                 phase1:Literal['Gas', 'Liquid', None]=None): 
-        super().__init__(locals())
-        
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium0) if phase0==None else interFT.Flange(name + '.F0', Medium=Medium0, phase=phase0)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium1) if phase1==None else interFT.Flange(name + '.F1', Medium=Medium1, phase=phase1)
-          
-    def Eqs(self):
-        spX0 = dict(zip(self.F0.Medium.species, self.F0.Xi))
-        Xi = np.zeros((self.F1.Medium.nX))
-        for i, var in enumerate(self.F1.Medium.species):
-            if var in spX0:
-                Xi[i] =  np.where(spX0[var] > 1e-8, spX0[var], 0)
-            elif 'H2O(L)' in spX0:
-                Xi[i] = spX0['H2O(L)']
-            else:
-                Xi[i] = 0
-                
-        self.F1.n = self.F0.n 
-        self.F1.Xi = Xi/np.sum(Xi)
-        self.F1.T = self.F0.T 
-        self.F1.P = self.F0.P
-    
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex
-    
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n
-    
-    def run_sol(self):
-        self.Eqs()    
- 
-class CompIsent(comp.CompIsent):
+    def __init__(self, name:str, Medium0:media.Medium_Base|None=None, Medium1:media.Medium_Base|None=None,
+                 phase0:Literal['Gas', 'Liquid', None]=None, phase1:Literal['Gas', 'Liquid', None]=None):
+        Medium0 = media.Fuel_CH4() if Medium0 is None else Medium0
+        Medium1 = mediaFT.Syncrude() if Medium1 is None else Medium1
+        super().__init__(name, Medium0=Medium0, Medium1=Medium1)
+        self.phase0, self.phase1 = phase0, phase1
+        if phase0 is not None:
+            self.F0 = interFT.Flange(name + '.F0', Medium=Medium0, phase=phase0)
+        if phase1 is not None:
+            self.F1 = interFT.Flange(name + '.F1', Medium=Medium1, phase=phase1)
+
+class CompIsent(turbomachinery.CompIsent):
     """
     Isentropic compressor extending from the CompressorFT Class. 
     One stream is entering and one stream is coming out. 
@@ -496,8 +464,7 @@ class CompIsent(comp.CompIsent):
                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0, 
                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=3.0, 
                  ):
-        super().__init__(name, Medium=Medium, eff=eff, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P, 
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
+        super().__init__(name, Medium=Medium, eff=eff)   # FT flanges with a phase replace the CSL ones
         
         self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P, phase='Gas')
         self.F1 = interFT.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P, phase='Gas')  
@@ -509,3 +476,85 @@ class CompIsent(comp.CompIsent):
 
 
 
+
+
+class Flash(ModelBase):
+    """
+    Vapour-liquid flash drum for FT media with Raoult's law.
+
+    The hydrocarbons C2+ form an ideal liquid solution (y_i P = x_i Psat_i), water condenses as a separate
+    pure liquid (y_w P = Psat_w), and the permanent gases (H2, CO, CO2, N2, CH4) do not dissolve. The vapour
+    pressures are the ones behind the FT liquid properties (``thermoFT.vapour_pressures``), so phase split
+    and enthalpies are consistent. For dissolved gases or non-ideal liquids use ``CSL.separation.Flash``
+    with real-fluid media.
+
+    Parameters:
+        name:   objects name
+        Medium: FT medium (``mediaFT.*``)
+        T:      drum temperature [K]; Q: heat duty [kJ/s] (Q=0 adiabatic). Neither: isothermal at the feed T
+        P:      drum pressure [bar]; otherwise the feed pressure minus ``dP``
+
+    Ports: F0 (feed) -> F1 (vapour, phase 'Gas'), F2 (liquid: hydrocarbons + water, phase 'Liquid')
+    Properties: beta (vapour fraction), water_liquid (mol/s of liquid water), Q, Exloss, Sgen
+
+    Example:
+        drum = componentsFT.Flash('drum', mediaFT.Syncrude(), T=310.0, P=20.0)
+        drum.F0.n = 10.0
+        drum.F0.Xi = x_syncrude
+        drum.F0.T = 500.0
+        drum.F0.P = 20.0
+        drum.run_sol()
+    """
+
+    def __init__(self, name:str, Medium:mediaFT.Medium_Syncrude, T:float|None=None, P:float|None=None,
+                 Q:float|None=None, dP:float=0.0):
+        if T is not None and Q is not None:
+            raise ValueError(f"{name}: give either the drum temperature T or the heat duty Q, not both")
+        super().__init__(dict(name=name, Medium=Medium, dP=dP))
+        self.T_spec, self.P_spec, self.Q_spec = T, P, Q
+        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, phase='Gas')
+        self.F1 = interFT.Flange(name + '.F1', Medium=Medium, phase='Gas')
+        self.F2 = interFT.Flange(name + '.F2', Medium=Medium, phase='Liquid', n=0.0)
+        sp = [str(x) for x in Medium.species]
+        self._water = sp.index('H2O') if 'H2O' in sp else None
+        self.beta, self.water_liquid = 1.0, 0.0
+
+    def _split(self, T:float, P:float) -> None:
+        n = self.F0.n*np.maximum(np.asarray(self.F0.Xi, dtype=float), 0.0)
+        psat = thermoFT.vapour_pressures(T, self.F0.Medium.species)
+        v, liq, w = thermoFT.raoult_split(n, psat, P, self._water)
+        liq = liq.copy()
+        if self._water is not None:
+            liq[self._water] += w
+        nV, nL = float(v.sum()), float(liq.sum())
+        self.beta, self.water_liquid = nV/max(nV + nL, 1e-300), w
+        for f, flows, total in ((self.F1, v, nV), (self.F2, liq, nL)):
+            f.n = total
+            f.P, f.T = P, T
+            if total > 0:
+                f.Xi = flows/total
+
+    @property
+    def Q(self):
+        return self.F1.n*self.F1.h + self.F2.n*self.F2.h - self.F0.n*self.F0.h
+
+    @property
+    def Exloss(self):
+        from ..CSL.exergy import T0
+        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Q*(1 - T0/self.F1.T)
+
+    @property
+    def Sgen(self):
+        return self.F1.n*self.F1.s + self.F2.n*self.F2.s - self.F0.n*self.F0.s - self.Q/self.F1.T
+
+    def run_sol(self):
+        P = self.P_spec if self.P_spec is not None else self.F0.P - self.dP
+        if self.Q_spec is None:
+            T = self.T_spec if self.T_spec is not None else self.F0.T
+            self._split(T, P)
+            return solvers.trivial_solution([T])
+
+        def residual(T):
+            self._split(T, P)
+            return (self.Q - self.Q_spec)/max(self.F0.n, 1e-300)
+        return solvers.solve_scalar(residual, 200.0, max(self.F0.T, 200.0) + 500.0, x0=self.F0.T, name=self.name)

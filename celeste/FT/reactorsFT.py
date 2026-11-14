@@ -20,7 +20,7 @@ class RStoic(ModelBase): #base.ModelBase
                 ):
         
         super().__init__ (locals()) #name, Medium=Medium, T=T, P=P, F0_n=F0_n, F0_Xi=F0_Xi, F1_n=F1_n, F1_Xi=F1_Xi, Q=Q
-        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Water(), n=1, Xi=np.array([1]), T=T, P=P, phase='Gas') # H2 in
+        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Water(), n=1, Xi=np.array([1]), T=T, P=P, phase='Gas') # steam in
         self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=T, P=P, phase='Gas')
         self.F1 = interFT.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=T, P=P, phase='Gas')
 
@@ -36,7 +36,7 @@ class RStoic(ModelBase): #base.ModelBase
             [(self.F0.n*self.F0.Xi[5] + self.F0.n*(np.dot(self.F0.Xi[[6,7,8]], [5,7,9])/3)) - self.F1.n*self.F1.Xi[5]], # CH4    
             
         ))
-        self.Q = (self.F1.n*self.F1.h - (self.F0.n*self.F0.n +  self.FH0.n*self.FH0.n))
+        self.Q = self.F1.n*self.F1.h - (self.F0.n*self.F0.h + self.FH0.n*self.FH0.h)   # heat duty, kW
         
         return self.Eq
     
@@ -50,9 +50,6 @@ class RStoic(ModelBase): #base.ModelBase
         return MB
     
     def ExBs(self):
-        self.FH0.ExBs()
-        self.F0.ExBs()
-        self.F1.ExBs()
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss = self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
         self.Exeff = 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.FH0.n*self.FH0.Ex + np.maximum(0, self.Exth)) 
@@ -200,9 +197,6 @@ class FT(ModelBase):
         return MB
         
     def ExBs(self)->None:
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
         self.Exth:float = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth
         self.Exeff:float = 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))      
@@ -250,10 +244,6 @@ class Dist(components.GPUbase):
         return MB
     
     def ExBs(self):
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
-        self.F3.ExBs()
         self.Wid = self.F3.n*self.F3.Ex + self.F2.n*self.F2.Ex + self.F1.n*self.F1.Ex - self.F0.n*self.F0.Ex
         self.W = float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
     
@@ -299,7 +289,7 @@ class Hydrocracker(ModelBase):
         super().__init__(locals())
         
         self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P, phase=phase0) # change to wax      
-        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Hydrogen(), n=FH0_n, Xi=np.array([1]), T=FH0_T, P=FH0_P, phase='Gas') # H2 in
+        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Hydrogen(), n=FH0_n, Xi=np.array([1]), T=FH0_T, P=FH0_P, phase='Gas') # steam in
         self.F1 = interFT.Flange(name + '.LightGas', Medium=mediaFT.LightGas(), n=F1_n, Xi=self.equiMol(mediaFT.LightGas()), T=F1_T, P=F1_P, phase=phase1) # Light gases C1-C4
         self.F2 = interFT.Flange(name + '.Naphtha', Medium=mediaFT.Naphtha(), n=F2_n, Xi=self.equiMol(mediaFT.Naphtha()), T=F2_T, P=F2_P, phase=phase2) # naphtha 
         self.F3 = interFT.Flange(name + '.Kerosene', Medium=mediaFT.Kerosene(), n=F3_n, Xi=self.equiMol(mediaFT.Kerosene()), T=F3_T, P=F3_P, phase=phase3) # kerose
@@ -353,12 +343,6 @@ class Hydrocracker(ModelBase):
         return MB
     
     def ExBs(self):
-        self.F0.ExBs()
-        self.FH0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
-        self.F3.ExBs()
-        self.F4.ExBs()
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss = (self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex 
                         - self.F2.n*self.F2.Ex - self.F3.n*self.F3.Ex - self.F4.n*self.F4.Ex + self.Exth)

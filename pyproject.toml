@@ -4,16 +4,18 @@ description = "Framework for conceptual process modelling and exergy analysis in
 authors = [
   { name = "Faisal Sedeqi", email = "tempest@dlr.de" },
 ]
-license = { text = "Proprietary" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "numpy",
-  "scipy",
+  "scipy>=1.9",
   "pandas",
   "openpyxl",
   "coolprop",
-  "numba",
+  "jax",
+  "equinox",
   "networkx",
   "matplotlib"
 ]
@@ -26,13 +28,55 @@ classifiers = [
 dynamic = ["version"]
 urls = { homepage = "https://github.com/DLR-TT-ESI-EHT/CELESTE" }
 
+[project.optional-dependencies]
+# carbon deposition check with a full chemical equilibrium (celeste.functions.carbonFraction, Flange.getCarbon)
+cantera = ["cantera"]
+# rendering of Mermaid graphs inside notebooks (celeste.functions.mm)
+notebook = ["ipython"]
+# running the test suite
+test = ["pytest"]
+dev = ["pytest", "cantera", "ipython"]
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["celeste"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+  "error::celeste.solvers.ConvergenceWarning",
+]
 
 [tool.hatch.metadata]
 allow-direct-references=true
 
+
+# Type checking without annotations: the models assign their flanges and parameters dynamically, so the
+# checks that need declared attributes (and the numpy / pandas overload checks) are off. Undefined names,
+# unused coroutines, bad syntax and the like stay on.
+[tool.pyright]
+include = ["celeste"]
+reportAttributeAccessIssue = false
+reportOptionalMemberAccess = false
+reportOptionalSubscript = false
+reportOptionalOperand = false
+reportIncompatibleMethodOverride = false
+reportIncompatibleVariableOverride = false
+reportArgumentType = false
+reportOperatorIssue = false
+reportAssignmentType = false
+reportUnsupportedDunderAll = false
+reportMissingImports = false
+reportCallIssue = false
+reportReturnType = false
+reportFunctionMemberAccess = false
+reportInvalidTypeForm = false
+reportPossiblyUnboundVariable = false

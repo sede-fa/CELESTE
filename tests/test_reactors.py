@@ -1,0 +1,386 @@
+"""Reactor and electrochemical models: element balances, equilibrium, physical solutions."""
+import numpy as np
+import pytest
+
+from celeste import solvers
+from celeste.CSL import electrochem, equilibrium, media, reactors
+from conftest import element_flow
+
+MEOH_FEED = np.array([0.75, 0.05, 0.1, 0.1, 1e-8, 1e-8, 1e-8])
+
+
+def assert_elements_conserved(unit, elements='CHON', rel=1e-7):
+    for el in elements:
+        n_in = sum(element_flow(f, el) for f in unit.inlets)
+        n_out = sum(element_flow(f, el) for f in unit.outlets)
+        assert n_out == pytest.approx(n_in, rel=rel, abs=1e-9), el
+
+
+def assert_physical(flange):
+    assert flange.n > 0 and np.all(flange.Xi >= 0) and np.sum(flange.Xi) == pytest.approx(1.0, abs=1e-7)
+
+
+def test_methanation_equilibrium():
+    r = reactors.MR('r', T=600.0)
+    r.F0.Xi, r.F0.P = np.array([0.6, 0.01, 0.2, 0.1, 0.08, 0.01]), 10.0
+    sol = r.run_sol()
+    assert sol.success and sol.residual_norm < 1e-7
+    np.testing.assert_allclose(r.F1.Xi, [0.0151, 0.2786, 0.1944, 0.0002, 0.4964, 0.0153], atol=5e-5)
+    assert r.Q == pytest.approx(-34.707014, rel=1e-6)            # K from NASA Gibbs energies (was -34.751)
+    assert_elements_conserved(r); assert_physical(r.F1)
+    x = r.F1.Xi
+    assert x[2]*x[0]/(x[3]*x[4]) == pytest.approx(equilibrium.K_WGS(600.0), rel=1e-5)
+    assert x[3]*x[0]**3*10.0**2/(x[1]*x[4]) == pytest.approx(equilibrium.K_MSR(600.0), rel=1e-5)
+    assert r.Exloss > 0 and r.Sgen > 0 and 0 < r.Exeff < 1
+    import scipy.optimize as spo
+    assert r.run_sol(method=spo.least_squares).cost < 1e-10      # user supplied solver still accepted
+    # extents follow from the flows and reproduce the outlet
+    nu = np.array([[1, 0, 1, -1, -1, 0], [3, -1, 0, 1, -1, 0]])
+    np.testing.assert_allclose(r.F1.n*r.F1.Xi, r.F0.n*r.F0.Xi + r.xi @ nu, atol=1e-12)
+
+
+def test_methanation_energy_specification_and_trace_feeds():
+    r = reactors.MR('r', T=500.0)
+    r.F0.Xi, r.F0.n, r.F0.P = np.array([0.2, 0.25, 0.05, 0.05, 0.45, 1e-4]), 2.0, 10.0
+    assert r.run_sol().success and r.isothermal
+    x = r.F1.Xi                                                  # a methanation feed at 500 K: traces of CO and H2
+    assert x[3] < 1e-5 and x[2]*x[0]/(x[3]*x[4]) == pytest.approx(equilibrium.K_WGS(500.0), rel=1e-6)
+    iso_Q = r.Q
+    r.Q = 0.0                                                    # switch the same reactor to adiabatic
+    assert r.run_sol().success and r.F1.T > 500.0 and r.Q == pytest.approx(0.0, abs=1e-8)
+    assert r.energy_balance() == pytest.approx(0.0, abs=1e-8)
+    r.T = 500.0                                                  # and back
+    assert r.run_sol().success and r.Q == pytest.approx(iso_Q, rel=1e-8)
+    with pytest.warns(DeprecationWarning):
+        old = reactors.MR('r', F0_Xi=np.array([0.6, 0.01, 0.2, 0.1, 0.08, 0.01]), T=600.0, P=10.0)
+    assert old.run_sol().success and (old.F0.P, old.F1.P, old.F0.T) == (10.0, 10.0, 600.0)
+
+
+def test_equilibrium_constants_from_nasa_gibbs_energies():
+    """K = exp(-dG/RT) from the NASA data; matches the former fits where they were fitted."""
+    assert equilibrium.K_WGS(1073.15) == pytest.approx(equilibrium.K_WGS_fit(1073.15), rel=6e-3)     # SOC range
+    assert equilibrium.K_rWGS(500.0) == pytest.approx(equilibrium.K_rWGS_Graaf(500.0), rel=5e-2)     # methanol range
+    assert equilibrium.K_MeOH_CO2(500.0) == pytest.approx(equilibrium.K_MeOH_CO2_Graaf(500.0), rel=0.25)  # Graaf: 22 % lower
+    assert equilibrium.K_rWGS(700.0)*equilibrium.K_WGS(700.0) == pytest.approx(1.0)
+    # CO + 2 H2 -> CH3OH is CO2 + 3 H2 -> CH3OH + H2O plus the reverse shift
+    assert equilibrium.K_MeOH_CO(550.0) == pytest.approx(equilibrium.K_MeOH_CO2(550.0)*equilibrium.K_WGS(550.0), rel=1e-10)
+    import jax, jax.numpy as jnp
+    assert float(jax.jit(lambda t: equilibrium.K_WGS(t, jnp.exp))(800.0)) == pytest.approx(equilibrium.K_WGS(800.0), rel=1e-5)
+
+
+HB_FEED = np.array([0.74, 0.25, 0.01])
+
+
+def test_haber_bosch_isothermal_and_adiabatic():
+    r = reactors.HB('r', T=673.15)
+    r.F0.n = 1.0
+    r.F0.Xi = HB_FEED
+    r.F0.P = 200.0
+    assert r.run_sol().success
+    np.testing.assert_allclose(r.F1.Xi, [0.4709, 0.1615, 0.3677], atol=5e-5)
+    assert r.F1.T == 673.15 and r.Q < 0
+    assert_elements_conserved(r, 'HN'); assert_physical(r.F1)
+    assert r.xi[0] == pytest.approx(r.F1.n*r.F1.Xi[2] - r.F0.n*r.F0.Xi[2], rel=1e-9)
+
+    a = reactors.HB('a', Q=0.0)                                   # same model, adiabatic
+    assert a.run_sol().success
+    np.testing.assert_allclose(a.F1.Xi, [0.6627, 0.2246, 0.1127], atol=5e-5)
+    assert a.F1.T == pytest.approx(838.505, abs=1e-2)             # ignited steady state
+    assert a.Q == pytest.approx(0.0, abs=1e-6) and 0 < a.conversion < 1 and a.Sgen > 0
+
+    c = reactors.HB('c', Q=-5.0)                                  # cooled bed
+    assert c.run_sol().success and c.Q == pytest.approx(-5.0, rel=1e-8) and a.F1.T > c.F1.T > 673.15
+    with pytest.warns(solvers.ConvergenceWarning):
+        assert not reactors.HB('d', Q=-50.0).run_sol().success     # duty cannot be met
+    with pytest.raises(ValueError):
+        reactors.HB('e', T=600.0, Q=0.0)
+
+
+def test_haber_bosch_former_interfaces():
+    from celeste._deprecation import CelesteDeprecationWarning
+    with pytest.warns(CelesteDeprecationWarning):
+        old = reactors.HB_Adiabatic('o', F0_Xi=HB_FEED)
+    assert isinstance(old, reactors.HB) and old.run_sol().success
+    assert old.F1.T == pytest.approx(838.505, abs=1e-2)
+    assert old.for_sol.__func__ is old.f_sol.__func__
+    with pytest.warns(CelesteDeprecationWarning):
+        legacy = reactors.HB('l', F0_n=2.0, F0_Xi=HB_FEED, P=150.0, F1_n=2.0)
+    assert (legacy.F0.n, legacy.F0.P) == (2.0, 150.0)
+
+
+def test_haber_bosch_plug_flow_bed():
+    bed = reactors.HB_1D('b', Vol=1.0)                               # adiabatic bed
+    assert bed.run_sol().success
+    assert bed.Q == pytest.approx(0.0, abs=1e-6)                     # exact energy balance
+    assert bed.F1.T == pytest.approx(838.5, abs=0.5)                 # approaches the adiabatic equilibrium
+    assert np.all(np.diff(bed.profile['T']) >= -1e-9) and np.all(np.diff(bed.profile['x_NH3']) >= -1e-12)
+    assert_elements_conserved(bed, 'HN')
+    small = reactors.HB_1D('s', Vol=1e-4)
+    small.run_sol()
+    assert 673.15 < small.F1.T < bed.F1.T
+    cooled = reactors.HB_1D('c', Vol=1.0, UA_V=0.5, T_wall=600.0)
+    cooled.run_sol()
+    assert cooled.Q == pytest.approx(cooled.Q_wall, rel=1e-6) and cooled.Q < 0 and cooled.F1.T < bed.F1.T
+    assert cooled.Exloss > 0
+
+
+def _meoh(**kw):
+    r = reactors.MeOH('r', **kw)
+    r.F0.n = 100
+    r.F0.Xi = MEOH_FEED
+    r.F0.T = 473.15
+    r.F0.P = 50.0
+    return r
+
+
+@pytest.mark.parametrize('kw, x_ref', [
+    (dict(model='equilibrium', T=473.15), [0.6342, 0.0660, 0.0965, 0.0073, 0.0356, 0.0, 0.1604]),
+    (dict(model='yield', T=473.15), [0.7017, 0.0581, 0.1087, 0.0425, 0.0076, 0.0, 0.0814]),
+    (dict(model='yield', Q=0.0), [0.6674, 0.0581, 0.0744, 0.0768, 0.0419, 0.0, 0.0814]),   # former MeOH_WGS
+])
+def test_methanol_reactor(kw, x_ref):
+    r = _meoh(**kw)
+    sol = r.run_sol()
+    assert sol.success
+    np.testing.assert_allclose(r.F1.Xi, x_ref, atol=5e-5)
+    assert_elements_conserved(r); assert_physical(r.F1)
+    assert r.Exloss > 0 and 0 < r.Exeff < 1 and r.Sgen > 0
+    if 'T' in kw:
+        assert r.F1.T == kw['T'] and r.Q < 0
+    else:
+        assert r.Q == pytest.approx(0.0, abs=1e-6) and r.F1.T == pytest.approx(650.648, abs=5e-3)
+    assert set(r.conversion) == {'H2 Conversion', 'CO2 Conversion', 'Carbon Conversion'}
+
+
+def test_methanol_equilibrium_satisfies_both_mass_action_laws():
+    r = _meoh(model='equilibrium', Q=0.0)
+    assert r.run_sol().success
+    x, T, P = r.F1.Xi, r.F1.T, r.F1.P
+    assert x[6]*x[4]/(x[2]*x[0]**3*P**2) == pytest.approx(equilibrium.K_MeOH_CO2(T), rel=1e-6)
+    assert x[3]*x[4]/(x[2]*x[0]) == pytest.approx(equilibrium.K_rWGS(T), rel=1e-6)
+    assert 473.15 < T < 650.0 and r.Q == pytest.approx(0.0, abs=1e-6)
+
+
+def test_methanol_kinetic_reactor_returns_a_physical_state():
+    """The unbounded solve used to converge to negative water and methanol fractions."""
+    r = _meoh(model='kinetic', M_cat=1000, T=473.15)
+    assert r.run_sol().success
+    assert_physical(r.F1); assert_elements_conserved(r)
+    assert r.F1.Xi[6] > 0.005 and r.F1.Xi[4] > 0.0
+    k_b = r._K_b
+    r.T = 500.0
+    assert r._K_b != k_b                                           # adsorption constants follow the temperature
+    big = _meoh(model='kinetic', M_cat=1e5, T=473.15)              # a large bed approaches equilibrium
+    big.run_sol()
+    eq_ = _meoh(model='equilibrium', T=473.15)
+    eq_.run_sol()
+    assert eq_.F1.Xi[6] > big.F1.Xi[6] > r.F1.Xi[6]
+    adiabatic = _meoh(model='kinetic', M_cat=1000, Q=0.0)          # ignited steady state
+    assert adiabatic.run_sol().success and adiabatic.F1.T > 540.0
+
+
+def test_methanol_former_classes():
+    from celeste._deprecation import CelesteDeprecationWarning
+    for cls, kw in [(reactors.MeOH_Equil, {}), (reactors.MeOH_Yield, {}), (reactors.MeOH_Kinetic, dict(M_cat=1000)),
+                    (reactors.MeOH_WGS, {})]:
+        with pytest.warns(CelesteDeprecationWarning):
+            r = cls('r', F0_n=100, F0_Xi=MEOH_FEED, **kw)
+        assert isinstance(r, reactors.MeOH) and r.run_sol().success
+    assert r.F1.T == pytest.approx(650.648, abs=5e-3)                  # MeOH_WGS is adiabatic
+    with pytest.warns(CelesteDeprecationWarning):
+        r.ExBs()
+
+
+def test_reformer():
+    r = reactors.Reformer('r', media.media_C3(), F0_Xi=np.array([1e-5, 0.2, 1e-5, 1e-5, 0.7, 1e-5, 0.1]), T=900.0)
+    sol = r.run_sol()
+    assert sol.success and np.isfinite(r.F1.T)
+    line = reactors.Reformer_1D('l', media.media_C3(), F0_Xi=np.array([1e-5, 0.2, 1e-5, 1e-5, 0.7, 1e-5, 0.1]), T=900.0, N=3)
+    line.run_sol()
+    assert line.getArrAttr('F1.T').shape == (3,) and line.Xd.shape == (3, 7)
+
+
+def test_solid_oxide_cell():
+    soc = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), I=-50.0, Ncells=100)
+    sol = soc.run_sol()
+    assert sol.success
+    assert soc.F1.Xi[0] == pytest.approx(0.1259, abs=1e-4) and soc.Vop == pytest.approx(1.3256, abs=1e-4)
+    assert soc.W == pytest.approx(6.628, abs=1e-3)
+    assert soc.mass_balance() == pytest.approx(0.0, abs=1e-8)
+    H = soc.ELEMENTS[1]
+    assert soc.F0.n*np.dot(soc.F0.Xi, H) == pytest.approx(soc.F1.n*np.dot(soc.F1.Xi, H), rel=1e-8)
+    assert soc.Exloss > 0 and soc.j == -0.5 and 0 < soc.RC < 1
+    # former keywords still work, with a deprecation warning
+    with pytest.warns(DeprecationWarning, match='outlet temperature as T='):
+        alt = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), T_soc0=1000.0, T_soc1=1050.0, P_soc=3.0, I=-10.0, Ncells=10)
+    assert (alt.F0.T, alt.F1.T, alt.F0.P, alt.A1.P) == (1000.0, 1050.0, 3.0, 3.0)
+    assert alt.T == 1050.0 and alt.isothermal
+    with pytest.warns(DeprecationWarning):
+        electrochem.SOC('s', media.Fuel_CH4(), media.Air(), extent=True)
+    with pytest.raises(ValueError):
+        electrochem.SOC('s', media.Fuel_CH4(), media.Air(), T=1073.15, Q=0.0)
+    with pytest.raises(ValueError):
+        electrochem.SOC('s', media.Fuel_CH4(), media.Air(), V_model='nernst')
+
+
+def _co_electrolysis(**kw):
+    kw = {'I': -200.0, 'Ncells': 100, **kw}
+    soc = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), **kw)
+    soc.F0.n, soc.F0.Xi = 1.0, np.array([0.05, 1e-8, 0.3, 1e-8, 0.65, 1e-8])
+    soc.A0.n = 2.0
+    soc.F0.T = soc.A0.T = 1073.15
+    return soc
+
+
+def test_soc_extents_close_the_balances_and_reach_equilibrium():
+    soc = _co_electrolysis()
+    assert soc.run_sol().success
+    assert soc.n_O < 0
+    n0, n1 = soc.F0.n*soc.F0.Xi, soc.F1.n*soc.F1.Xi
+    C, H, O, N = soc.ELEMENTS
+    for E in (C, H, N):
+        assert np.dot(n0, E) == pytest.approx(np.dot(n1, E), rel=1e-9)
+    assert np.dot(n0, O) + soc.n_O == pytest.approx(np.dot(n1, O), rel=1e-9)
+    # the extents follow from the flows: CO2 formed by the shift, CH4 converted by reforming
+    nu = np.array([[-1, 0, 0, 0, 1, 0], [1, 0, 1, -1, -1, 0], [3, -1, 0, 1, -1, 0]])
+    assert n1 == pytest.approx(n0 + np.array([soc.n_O, soc.xi_WGS, soc.xi_MSR]) @ nu, rel=1e-8, abs=1e-12)
+    assert soc.mass_balance() == pytest.approx(0.0, abs=1e-10)
+    x = dict(zip(soc.F1.Medium.species, soc.F1.Xi))
+    assert x['CO2']*x['H2']/(x['CO']*x['H2O']) == pytest.approx(soc.K_WGS(), rel=1e-8)
+    assert x['CO']*x['H2']**3*soc.F1.P**2/(x['CH4']*x['H2O']) == pytest.approx(soc.K_MSR(), rel=1e-8)
+    assert soc.energy_balance() == pytest.approx(0.0, abs=1e-10)
+
+
+def test_soc_voltage_models():
+    soc = _co_electrolysis()
+    soc.run_sol()
+    # in electrolysis the local Nernst potential rises along the cell
+    assert soc.V_nernst_in < soc.Vid == soc.V_mean < soc.V_nernst_out
+    # fed with an equilibrium mixture, the charge-averaged Nernst potential of an isothermal stack is the
+    # Gibbs energy difference of the streams
+    feed = _co_electrolysis(I=-1e-6)
+    feed.run_sol()
+    eq_soc = _co_electrolysis()
+    eq_soc.F0.n, eq_soc.F0.Xi = feed.F1.n, feed.F1.Xi.copy()
+    eq_soc.run_sol()
+    assert eq_soc.V_mean == pytest.approx(eq_soc.V_streams, abs=1e-9)
+    out = _co_electrolysis(V_model='outlet')
+    out.run_sol()
+    assert out.Vid == out.V_nernst_out and out.V_mean == pytest.approx(soc.V_mean)
+    assert out.Vop == pytest.approx(out.Vid - out.ASR()*out.j)
+    streams = _co_electrolysis(V_model='streams')
+    streams.run_sol()
+    assert streams.Vid == pytest.approx(soc.V_streams)
+
+
+def test_soc_adiabatic_and_heat_duty():
+    iso = _co_electrolysis(T=1100.0)
+    iso.run_sol()
+    # the heat duty of the isothermal stack, specified, gives back its temperature
+    duty = _co_electrolysis(Q=float(iso.Q))
+    duty.F1.T = 1000.0
+    assert duty.run_sol().success
+    assert duty.F1.T == pytest.approx(1100.0, abs=1e-6) and duty.Vop == pytest.approx(iso.Vop, abs=1e-8)
+    adi = _co_electrolysis(Q=0.0)
+    assert adi.run_sol().success and not adi.isothermal
+    assert adi.Q == pytest.approx(0.0, abs=1e-8) and adi.energy_balance() == pytest.approx(0.0, abs=1e-8)
+    assert adi.F1.T == adi.A1.T and adi.F1.T > adi.F0.T          # above the thermoneutral voltage
+    lossy = _co_electrolysis(Q=0.0, Qloss=-2.0)
+    lossy.run_sol()
+    assert lossy.F1.T < adi.F1.T and lossy.energy_balance() == pytest.approx(0.0, abs=1e-8)
+    # the stream Gibbs energy difference is no voltage once the temperature changes
+    assert abs(adi.V_streams - adi.V_mean) > 1.0
+    adi.T = 1073.15
+    assert adi.isothermal and adi.run_sol().success and adi.F1.T == 1073.15
+
+
+def test_soc_heat_loss_and_gouy_stodola():
+    soc = _co_electrolysis()
+    soc.run_sol()
+    lossy = _co_electrolysis(Qloss=-3.0)
+    lossy.run_sol()
+    assert lossy.Q == pytest.approx(soc.Q + 3.0) and lossy.W == pytest.approx(soc.W)
+    T0 = 298.15
+    gap, gap_lossy = soc.Exloss - T0*soc.Sgen, lossy.Exloss - T0*lossy.Sgen
+    # Exloss = T0*Sgen up to the mismatch of the tabulated chemical exergies with the NASA data, which
+    # depends on the extents only (docs/known_issues.md)
+    assert gap_lossy == pytest.approx(gap, abs=1e-10) and abs(gap) < 1e-3*soc.W
+    assert lossy.Exloss > soc.Exloss
+
+
+def test_alkaline_electrolyser():
+    ael = electrochem.AEL('a', media.Media_AEL(), Ncells=100, A=800, T=350.0)
+    sol = ael.run_sol()
+    assert sol.success
+    assert ael.j == pytest.approx(-2.4072959, rel=1e-6) and ael.W == pytest.approx(772.5611, rel=1e-6)
+    assert ael.mass_balance() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_soc_average_voltage_model_and_current_density_setter():
+    soc = _co_electrolysis(V_model='average')
+    soc.run_sol()
+    x_in, x_out = soc.nernst_x(soc.F0.Xi, soc.A0.Xi), soc.nernst_x(soc.F1.Xi, soc.A1.Xi)
+    assert soc.Vid == pytest.approx(soc.nernst(soc.F1.T, soc.F1.P, *(0.5*(np.array(x_in) + np.array(x_out)))))
+    assert electrochem.SOC_Nernst_avg('s', media.Fuel_CH4(), media.Air()).V_model == 'average'
+    soc.j = -0.5
+    assert soc.I == pytest.approx(-0.5*soc.cellArea) and soc.j == pytest.approx(-0.5)
+    assert soc.Wid == pytest.approx(-soc.Vid*soc.I*soc.Ncells*1e-3)
+
+
+def test_soc_air_ratio_and_utilisation():
+    fc = electrochem.SOC('fc', media.Fuel_CH4(), media.Air(), I=40.0, Ncells=100)
+    fc.F0.n, fc.F0.Xi = 1.0, np.array([0.9, 1e-8, 1e-8, 1e-8, 0.1, 1e-8 ])
+    fc.A0.n = 5.0
+    assert fc.run_sol().success
+    consumed = fc.A0.n*fc.A0.Xi[0] - fc.A1.n*fc.A1.Xi[0]
+    assert fc.Lambda == pytest.approx(fc.A0.n*fc.A0.Xi[0]/consumed) and fc.Lambda > 1
+    assert fc.AU == pytest.approx(consumed/(fc.A0.n*fc.A0.Xi[0]))
+    assert _co_electrolysis().Lambda != _co_electrolysis().Lambda      # nan in electrolysis mode
+
+
+def _pcc(I, **kw):
+    pcc = electrochem.PCC('p', I=I, cellArea=100., Ncells=10, EffFar=0.9, **kw)
+    pcc.F0.n = 0.3
+    pcc.F0.Xi = np.array([0.05, 0.2, 1e-8, 1e-8, 0.05, 0.7]) if I < 0 else np.array([0.6, 0.1, 0.05, 0.05, 0.1, 0.1])
+    pcc.A0.n, pcc.A0.Xi = 1.0, np.array([0.21, 0.74, 0.05])
+    pcc.F0.T = pcc.A0.T = 873.15
+    return pcc
+
+
+@pytest.mark.parametrize('I', [-30.0, 30.0])
+def test_pcc_balances_and_voltage_models(I):
+    pcc = _pcc(I)
+    assert pcc.run_sol().success
+    n0, n1 = pcc.F0.n*pcc.F0.Xi, pcc.F1.n*pcc.F1.Xi
+    C, H, O, N = pcc.ELEMENTS
+    for E, moved in ((C, 0.0), (O, 0.0), (N, 0.0), (H, pcc.n_H)):
+        assert np.dot(n0, E) - np.dot(n1, E) == pytest.approx(moved, abs=1e-12)
+    assert np.sign(pcc.n_H) == np.sign(I)                       # protons leave the fuel side in fuel cell mode
+    assert pcc.mass_balance() == pytest.approx(0.0, abs=1e-10)
+    assert pcc.energy_balance() == pytest.approx(0.0, abs=1e-10)
+    x = dict(zip(pcc.F1.Medium.species, pcc.F1.Xi))
+    assert x['CO2']*x['H2']/(x['CO']*x['H2O']) == pytest.approx(pcc.K_WGS(), rel=1e-8)
+    assert pcc.Exloss > 0 and pcc.Sgen > 0
+    # the air side forms water per proton from a quarter oxygen
+    assert pcc.A1.n*pcc.A1.Xi[2] - pcc.A0.n*pcc.A0.Xi[2] == pytest.approx(0.5*pcc.n_H)
+    assert pcc.A0.n*pcc.A0.Xi[0] - pcc.A1.n*pcc.A1.Xi[0] == pytest.approx(0.25*pcc.n_H)
+    for model in ('mean', 'outlet', 'average', 'streams'):
+        other = _pcc(I, V_model=model)
+        other.run_sol()
+        assert 0.5 < abs(other.Vid) < 1.5
+        assert other.Vop == pytest.approx(other.Vid - other.ASR_mean*other.j)
+    # former class names
+    assert electrochem.PCC_delG('p').V_model == 'streams' and electrochem.PCC_Nernst_avg('p').V_model == 'average'
+    assert issubclass(electrochem.PCC_base, electrochem.PCC)
+
+
+def test_pcc_area_specific_resistance_choices_and_current_density():
+    pcc = _pcc(-30.0)
+    pcc.run_sol()
+    assert pcc.j == pytest.approx(pcc.I*0.9/pcc.cellArea)               # electrolysis: ionic current is EffFar times smaller
+    pcc.j = 0.2
+    assert pcc.I == pytest.approx(0.2*pcc.cellArea*0.9) and pcc.j == pytest.approx(0.2)
+    for choice in range(5):
+        assert _pcc(-30.0, T=873.15, asr_choice=choice).ASR() > 0
+    with pytest.raises(ValueError):
+        _pcc(-30.0, T=1000.0).ASR()                                     # outside the validity range of the polynomial fit

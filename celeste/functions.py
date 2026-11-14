@@ -1,12 +1,16 @@
-import functools
-import numpy as np
-from numpy.typing import NDArray
-import scipy as sp
-import cantera as ct
-
 import base64
-from IPython.display import display_svg
-from urllib.request import Request, urlopen
+import functools
+
+import numpy as np
+import scipy.constants
+
+
+def _cantera():
+    try:
+        import cantera as ct
+    except ImportError as err:  # pragma: no cover - depends on the environment
+        raise ImportError("carbonFraction() needs the optional dependency cantera: pip install 'celeste[cantera]'") from err
+    return ct
 
 
 def toSolve(x, sys, *args):
@@ -24,7 +28,7 @@ def rgetattr(obj, attr, *args):
         return getattr(obj, attr, *args)
     return functools.reduce(_getattr, [obj] + attr.split('.'))
 
-def carbonFraction(T:float, P:float, x_dict:dict[str,float]) -> tuple[float, float]:
+def carbonFraction(T, P, x_dict):
     '''
     Calculate vapor and graphite fractions at equilibrium using Cantera
     
@@ -46,6 +50,7 @@ def carbonFraction(T:float, P:float, x_dict:dict[str,float]) -> tuple[float, flo
         Solid carbon mole fraction (0 to 1)
     '''
     
+    ct = _cantera()
     T_K = T
     P_Pa = P * 1e5
     
@@ -89,7 +94,7 @@ def carbonFraction(T:float, P:float, x_dict:dict[str,float]) -> tuple[float, flo
     
     return gasphase, graphite
     
-def CForm(T:float, P:float, x:NDArray[np.float64]) -> dict[str,float]:
+def CForm(T, P, x):
     ''' 
     function for checking the possibility of carbon formation with the help of the alpha and betha parameters and the equilibrium constants calculation.
     
@@ -110,7 +115,7 @@ def CForm(T:float, P:float, x:NDArray[np.float64]) -> dict[str,float]:
     if K_2/betha > 1 -> is likely to have carbon deposition
     '''
     
-    R = sp.constants.value(u"molar gas constant") # J/mol*K
+    R = scipy.constants.R # J/mol*K
     T_K = T + 273.15
     Po = 1e5 
     P_Pa = P*Po 
@@ -129,10 +134,13 @@ def CForm(T:float, P:float, x:NDArray[np.float64]) -> dict[str,float]:
     #print(f"{'Warning!: Carbon deposition by the' if K_1/alpha > 1 else 'No carbon deposition by the'} CH4 reaction. K_CH4/alpha = {K_1/alpha} ")
     #print(f"{'Warning: Carbon deposition by the' if K_2/betha > 1 else 'No carbon deposition by the'} CO2 reaction. K_CO2/betha = {K_2/betha} ")
     
-    variables: dict[str,float] = {'K_1':K_1, 'K_2':K_2, 'alpha':alpha, 'betha':betha, 'K_CH4/alpha':K_1/alpha, 'K_CO2/betha':K_2/betha}
+    variables = {'K_1':K_1, 'K_2':K_2, 'alpha':alpha, 'betha':betha, 'K_CH4/alpha':K_1/alpha, 'K_CO2/betha':K_2/betha}
     return variables
 
 def mm(graph):
+    """Render a Mermaid graph in a notebook through the mermaid.ink web service (needs IPython and internet access)."""
+    from urllib.request import Request, urlopen
+    from IPython.display import display_svg
     graphbytes = graph.encode("ascii")
     base64_bytes = base64.b64encode(graphbytes)
     base64_string = base64_bytes.decode("ascii")

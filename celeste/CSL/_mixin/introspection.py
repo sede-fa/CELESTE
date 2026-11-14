@@ -1,4 +1,5 @@
-import inspect
+import numpy as np
+import pandas as pd
 
 from celeste import CSL
 
@@ -23,13 +24,16 @@ class IntrospectionMixin:
         """
         from .._base import ModelBase
         out = []
-        for i in inspect.getmembers(self):
-            if isinstance(i[1], ModelBase):
-                if getattr(i[1], "_is_system", False):
-                    out += i[1].r_get(prefix + i[0] + '.')
-                else:
-                    out += [prefix + i[0]]
+        for key, obj in self._members(ModelBase):
+            if getattr(obj, "_is_system", False):
+                out += obj.r_get(prefix + key + '.')
+            else:
+                out += [prefix + key]
         return out
+
+    def _units(self):
+        """(path, unit) pairs of every unit model in the hierarchy."""
+        return [(path, self.rgetattr(path)) for path in self.r_get()]
 
     def get_AllFlanges(self):
         """
@@ -68,10 +72,21 @@ class IntrospectionMixin:
                 True indicates successful convergence, False indicates failure.
         """
         success = {}
-        for i in self.r_get():
-            if 'f_sol' in dir(self.rgetattr(i)):
-                success[i] = self.rgetattr(i)._sol.success
+        for i, unit in self._units():
+            if hasattr(unit, 'f_sol'):
+                sol = getattr(unit, '_sol', None)
+                # None: the unit has not been solved through a system yet, or it is evaluated explicitly
+                success[i] = None if sol is None else bool(getattr(sol, 'success', True))
         return success
+
+    def get_Electric(self):
+        """
+        Components that exchange work with the surroundings (anything exposing ``W``).
+
+        Returns:
+            dict: A dictionary mapping component paths to their object references.
+        """
+        return {i: unit for i, unit in self._units() if hasattr(unit, 'W')}
 
     def get_Sources(self):
         """
@@ -132,7 +147,7 @@ class IntrospectionMixin:
         sg = {}
         for i in self.r_get():
             if not isinstance(self.rgetattr(i), (CSL.flow.SourceM, CSL.flow.Sink)):
-                sgen = self.rgetattr(i).Sgen #np.where(np.abs(self.rgetattr(i).Sgen) > 1e-10, self.rgetattr(i).Sgen, 0)
+                sgen = getattr(self.rgetattr(i), 'Sgen', np.nan)   # nan: the unit defines no entropy balance
                 sg[i] = {
                     'Sgen': sgen,
                     'Sgen*T0': sgen*298.15
@@ -140,51 +155,33 @@ class IntrospectionMixin:
         return pd.DataFrame(sg).transpose()
     
     def exdest_df(self):
-        comp = 0
-        SOC = 0
-        heaters = 0
-        coolers = 0
-        reactor = 0
-        valves = 0
-        gpu = 0
-        sp_mx = 0
-        ASU = 0
-        DAC = 0
+        """Exergy destruction grouped by component class, in kW and % of the total."""
+        groups = {'Compressors': 0, 'SOC': 0, 'ASU': 0, 'DAC': 0, 'Heaters': 0, 'Coolers': 0, 'GPU': 0,
+                  'Reactor': 0, 'Separation': 0, 'Split_Mix': 0, 'Valves': 0}
         tot = self.tot_Exloss()
-        for i,v in self.get_Exloss().items():
-            if isinstance(self.rgetattr(i), (CSL.components.Pump, CSL.components.Compressor)):
-                comp += v.Exloss
-            if isinstance(self.rgetattr(i), CSL.electrochem.SOC):
-                SOC += v.Exloss
-            if isinstance(self.rgetattr(i), CSL.components.ASU):
-                ASU += v.Exloss
-            if isinstance(self.rgetattr(i), CSL.components.DAC):
-                DAC += v.Exloss
-            if isinstance(self.rgetattr(i), CSL.heat.Heater):
-                heaters += np.where(v.Q > 0, v.Exloss, 0) 
-                coolers += np.where(v.Q < 0, v.Exloss, 0) 
-            if isinstance(self.rgetattr(i), CSL.reactors.MR): # have to add the other isothermal reactors
-                reactor += v.Exloss 
-            if isinstance(self.rgetattr(i), (CSL.components.GPU_2S,
-                                            CSL.components.GPU_2SV2, 
-                                            CSL.components.GPU_3S)):
-                gpu += v.Exloss 
-            if isinstance(self.rgetattr(i), (CSL.flow.Mixer, CSL.flow.Splitter)):
-                sp_mx += v.Exloss
-            if 'valve' in i or 'Valve' in i:
-                valves += v.Exloss
-        final = {'Compressors':comp,
-                'SOC': SOC,
-                'ASU': ASU,
-                'DAC': DAC,
-                'Heaters': heaters,
-                'Coolers': coolers,
-                'GPU': gpu,
-                'Reactor':reactor,
-                'Split_Mix':sp_mx,
-                'Valves':valves,
-                'Total': tot,
-                }
-        ex = pd.DataFrame({'Ex. destruction / kW':final})
+        for i, v in self.get_Exloss().items():
+            if isinstance(v, (CSL.components.Pump, CSL.turbomachinery.Compressor)):
+                groups['Compressors'] += v.Exloss
+            if isinstance(v, CSL.electrochem.SOC):
+                groups['SOC'] += v.Exloss
+            if isinstance(v, CSL.components.ASU):
+                groups['ASU'] += v.Exloss
+            if isinstance(v, CSL.components.DAC):
+                groups['DAC'] += v.Exloss
+            if isinstance(v, CSL.heat.Heater):
+                groups['Heaters'] += np.where(v.Q > 0, v.Exloss, 0)
+                groups['Coolers'] += np.where(v.Q < 0, v.Exloss, 0)
+            if isinstance(v, (CSL.reactors.EquilBase, CSL.reactors.ExtentReactor, CSL.reactors.HB_1D, CSL.reactors.Reformer)):
+                groups['Reactor'] += v.Exloss
+            if isinstance(v, CSL.components.GPUbase):
+                groups['GPU'] += v.Exloss
+            if isinstance(v, CSL.separation.Flash):
+                groups['Separation'] += v.Exloss
+            if isinstance(v, (CSL.flow.Mixer, CSL.flow.Splitter)):
+                groups['Split_Mix'] += v.Exloss
+            if isinstance(v, CSL.components.Valve) or 'valve' in i or 'Valve' in i:
+                groups['Valves'] += v.Exloss
+        groups['Total'] = tot
+        ex = pd.DataFrame({'Ex. destruction / kW': {k: float(v) for k, v in groups.items()}})
         ex.insert(1, '%', ex.values*100/tot)
         return ex

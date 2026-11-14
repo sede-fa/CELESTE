@@ -5,14 +5,14 @@ from . import interfacesFT as interFT
 class SourceM(flow.SourceM):  # could inherit from base source
 
     def __init__(self, name, Medium, F1_n=1, F1_Xi=None, F1_T=298.15, F1_P=1., phase='Gas'):
-        super().__init__(name, Medium, F1_n, F1_Xi, F1_T, F1_P)
+        super().__init__(name, Medium, F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
         self.F1 = interFT.Flange(self.name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P, phase=phase)
         
         
 class Sink(flow.Sink):  # could inherit from base sink
 
     def __init__(self, name, Medium, F0_n=1, F0_Xi=None, F0_T=298.15, F0_P=1., phase='Gas'):
-        super().__init__(name, Medium, F0_n, F0_Xi, F0_T, F0_P)
+        super().__init__(name, Medium)
         self.F0 = interFT.Flange(self.name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P, phase=phase)
         
       
@@ -36,15 +36,13 @@ class Splitter(ModelBase):  # could inherit from base splitter
         self.F2.n = (1-self.Split)*self.F0.n
     
     def ExBs(self):
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
         self.ExB = self.F2.n*self.F2.Ex + self.F1.n*self.F1.Ex - self.F0.n*self.F0.Ex
     
     def run_sol(self):
         return self.Eqs()
     
 class Mixer(ModelBase):  # could inherit from base mixer
+    _inlet_ports = ('F0', 'F1')   # two feeds, one product (F2)
     
     def __init__(self, name, Medium, T=298.15, P=1., 
                  F0_n=1, F0_Xi=None, phase0='Gas',
@@ -61,19 +59,7 @@ class Mixer(ModelBase):  # could inherit from base mixer
         self.F2.n = (self.F0.n + self.F1.n)
         self.F2.Medium.PTX = self.F0.P, self.F0.T, (self.F0.Xi*self.F0.n + self.F1.Xi*self.F1.n)/self.F2.n
        
-    def MBcheck(self):
-        # Mass balance
-        self.m0 = self.F0.n*self.Medium.Thermo.MWMix(self.F0.Xi) 
-        self.m1 = self.F1.n*self.Medium.Thermo.MWMix(self.F1.Xi)
-        self.m2 = self.F2.n*self.Medium.Thermo.MWMix(self.F2.Xi)
-        MB = self.m0 + self.m1 - self.m2
-        print(f"{abs(((self.m0+self.m1)/self.m2) - 1)*100}% difference ")    
-        return MB
-
     def ExBs(self):
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
         self.ExB = self.F2.n*self.F2.Ex - (self.F0.n*self.F0.Ex + self.F1.n*self.F1.Ex)
     
     def run_sol(self):

@@ -3,8 +3,8 @@ Heat Flow related objects i.e. sources, sinks and pipes
 '''
 
 from . import interfaces, ModelBase, media
+from .. import solvers
 import numpy as np
-import scipy.optimize as spo
 from numpy.typing import NDArray as npArray
 from typing import Callable, override, Literal 
 
@@ -72,20 +72,24 @@ class HexBase(ModelBase):
         ])
         return self.Eq
     
+    def heat_and_work(self) -> float:
+        """Nothing crosses the unit boundary: ``Q`` is the duty passed from the hot to the cold side."""
+        return 0.0
+
     @property
-    def Q(self):
+    def Q(self) -> float:
         return self.epsilon*self.Qmax
     
     @property
-    def QmaxH(self):
+    def QmaxH(self) -> float:
         return self.H0.n*(self.H0.h - self.__H0.h)
     
     @property
-    def QmaxC(self):
+    def QmaxC(self) -> float:
         return self.C0.n*(self.C0.h - self.__C0.h)
 
     @property
-    def Qmax(self):
+    def Qmax(self) -> float:
         return self.Cmin*(self.H0.T-self.C0.T)
     
     @property
@@ -105,19 +109,19 @@ class HexBase(ModelBase):
         return C
     
     @property
-    def Cr(self):
+    def Cr(self) -> float:
         return self.Cmin/self.Cmax
     
     @property
-    def epsilon(self):
+    def epsilon(self) -> float:
         return -1.
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.H0.n*(self.H0.Ex - self.H1.Ex) + self.C0.n*(self.C0.Ex - self.C1.Ex)
     
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.H0.n*(self.H1.s - self.H0.s) + self.C0.n*(self.C1.s - self.C0.s)
     
     def f_sol(self, x:npArray[np.float64]) -> npArray[np.float64]:
@@ -127,16 +131,28 @@ class HexBase(ModelBase):
 
     def run_sol(self):
         x0=np.array([self.H0.T,self.C0.T])
-        sol = spo.root(self.f_sol, x0)
-        return sol
+        return solvers.solve(self.f_sol, x0, name=self.name)
    
 class HexNTU(HexBase):
-    """_summary_
+    """
+    Two-stream heat exchanger rated with the effectiveness-NTU method.
 
-    Args:
-        HexBase (_type_): _description_
-        when HexType is counter-flow or co-flow the UA is in J/K*s
-        when HexType is 'other' the UA is a proxy for effectiveness
+    Parameters:
+        name:    objects name
+        MediumH: media of the hot stream (ports H0 -> H1)
+        MediumC: media of the cold stream (ports C0 -> C1)
+        UA:      overall conductance in W/K for 'counter-flow' and 'co-flow';
+                 for any other HexType it is used directly as the effectiveness (0..1)
+        HexType: 'counter-flow', 'co-flow' or anything else for a fixed effectiveness
+
+    Properties:
+        NTU, Cr, epsilon: number of transfer units, capacity ratio, effectiveness
+        Q: heat transferred from the hot to the cold stream [kJ/s]
+
+    Example:
+        hx = HexNTU('hx', MediumH=media.Air(), MediumC=media.Air(), UA=50.)
+        hx.H0.T, hx.C0.T = 800., 300.
+        hx.run_sol()          # sets hx.H1.T and hx.C1.T
     """
 
     def __init__(self, name:str, MediumH:media.Medium_Base, MediumC:media.Medium_Base, UA:float=0.99, HexType:str='counter-flow'):
@@ -161,7 +177,7 @@ class HexNTU(HexBase):
         self.eps_targ: float
 
     @property
-    def NTU(self):
+    def NTU(self) -> float:
         return self.UA*1e-3/self.Cmin
     
     @property
@@ -231,7 +247,7 @@ class HexNTU(HexBase):
             self.UA = -self.Cmin * 1e3 * np.log(1 - eps_final*(1+self.Cr)) / (1+self.Cr)
         elif self.HexType == 'counter-flow':
             if self.Cr == 1.0:
-                self.UA = eps_final/(1-eps_final)
+                self.UA = self.Cmin*1e3*eps_final/(1-eps_final)
             else:
                 self.UA = -self.Cmin * 1e3 * np.log((1-eps_final)/(1-eps_final*self.Cr)) / (1-self.Cr)
         else:    
@@ -294,14 +310,12 @@ class Heater(ModelBase):
     
     """
     
-    def __init__(self, name:str, Medium0:media.Medium_Base, Medium1:media.Medium_Base,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=1.0,
-                 ):
+    def __init__(self, name:str, Medium0:media.Medium_Base, Medium1:media.Medium_Base|None=None, **legacy):
+        Medium1 = Medium0 if Medium1 is None else Medium1
         super().__init__(locals())
-        
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium0, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium1, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium0)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium1)
+        self._init_state(legacy)
         
     def Eqs(self):
         self.F1.n = self.F0.n
@@ -309,17 +323,11 @@ class Heater(ModelBase):
         self.F1.P = self.F0.P
 
     @property
-    def Q(self):
+    def Q(self) -> float:
         return (self.F1.n*self.F1.h - self.F0.n*self.F0.h)
     
-    def MBcheck(self):
-        # Mass balance
-        MB = self.F0.m - self.F1.m
-        print(f"{abs((self.F0.m/self.F1.m) - 1)*100}% difference ")    
-        return MB
-    
     @property
-    def Exth(self):
+    def Exth(self) -> float:
         if self.Q < 0:
             th = self.Q*(1-298.15/self.F1.T) 
         else:
@@ -327,11 +335,11 @@ class Heater(ModelBase):
         return th
     
     @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.Ex*self.F0.n - self.F1.Ex*self.F1.n + self.Exth
     
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         if self.Q < 0:
             sb = self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F1.T 
         else:
@@ -342,3 +350,10 @@ class Heater(ModelBase):
     def run_sol(self):
         # forward run
         self.Eqs()
+
+
+def heater_to(name: str, Medium: media.Medium_Base, T, P, MediumOut=None):
+    """A ``Heater`` (or cooler) from ``Medium`` to ``MediumOut`` (default the same) whose outlet is at T [K] and P [bar]."""
+    unit = Heater(name, Medium0=Medium, Medium1=MediumOut or Medium)
+    unit.F1.T, unit.F1.P = T, P
+    return unit
