@@ -4,7 +4,6 @@ Compressor and turbine unit models with and without performance maps.
 import numpy as np
 import pandas as pd
 import scipy.optimize as spo
-from numpy.typing import NDArray as npArray
 
 from .. import ModelBase, interfaces, media
 from .corrections import R_UNIVERSAL, Wcorr_from_mf, delta, theta
@@ -171,215 +170,146 @@ class _MappedMixin:
         return self.Eqs()
 
    
-class Compressor(ModelBase):
+class _RealGasPath:
     """
-    base.ModelBase object with one flange F0 in and one flange F1 out. 
-    This is the base Compressor object from which other related objects could extent. No methods are included.
-    
+    Real-gas compression or expansion from the inlet F0 to the outlet pressure F1.P in ``n_steps`` steps.
+
+    Each step is an isentropic change followed by the efficiency correction of its enthalpy change,
+    ``h1 = h0 + dh_s/eta`` for compression and ``h1 = h0 + dh_s*eta`` for expansion. One step with ``eta`` the
+    isentropic efficiency gives the isentropic model, many steps with ``eta`` the polytropic efficiency converge
+    to the polytropic model.
+    """
+    _n_steps = 1
+
+    def _path(self, eta, n_steps=None):
+        F0, F1 = self.F0, self.F1
+        F1.n, F1.Xi = F0.n, F0.Xi
+        if '_iso' not in self.__dict__:                       # internal state flange, kept out of the unit's ports
+            self.__dict__['_iso'] = [interfaces.Flange(self.name + '.iso', Medium=F0.Medium)]
+        iso = self.__dict__['_iso'][0]
+        n_steps = n_steps or self._n_steps
+        compress = F1.P > F0.P
+        eta_h = eta if compress else 1/eta
+        iso.Xi, iso.P, iso.T = F0.Xi, F0.P, F0.T
+        for P in np.geomspace(F0.P, F1.P, n_steps + 1)[1:]:
+            h0, s0 = iso.h, iso.s
+            iso.T_sPX(s0, P, F0.Xi)
+            iso.T_hx(h0 + (iso.h - h0)/eta_h, F0.Xi)
+        F1.T = iso.T
+
+
+class Compressor(_RealGasPath, ModelBase):
+    """
+    Compressor with one inlet flange F0 and one outlet flange F1. The outlet pressure is set on ``F1.P``.
+    Base of the compressor models; subclasses provide ``Eqs`` and the work ``W``.
+
     Parameters:
         name: objects name
         Medium: media of the streams
-        eff: work efficiency of the Compressor object. Must be 0 < eff <= 1. Defaults to 1
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium. Defaults to None   
-        F0_T: inlet temperature in [K]. Defaults to 298.15 
-        F1_T: outlet temperature in [K]. Defaults to 398.15
-        F0_P: inlet pressure in [bar]. Defaults to 1.0
-        F1_P: outlet pressure in [bar]. Defaults to 3.0 
+        eff: efficiency (0 < eff <= 1); its meaning is given by the subclass
 
-    Attributes: 
-        F0: flange F0
-        F1: flange F1
+    Properties:
+        W: shaft work [kJ/s]
+        Exloss: exergy destruction [kJ/s], Sgen: entropy generation [kJ/K/s], Exeff: exergy efficiency
     """
-    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=None,
-                F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=398.15, F1_P:float=3.0, 
-                ):
+    _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=398.15, P=3.0)}
+
+    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1.0, **legacy):
         super().__init__(locals())
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P)
-
-class CompIsot(Compressor):
-    """
-    Isothermal compressor extending from the Compressor class. 
-    One stream is entering and one stream is coming out. 
-    The outlet n, Xi, h, cp, g, s are determined.
-    The work of the CompIsot object is calculated isothermally.
-    IMPORTANT: the inlet temperature and pressure, and the outlet pressure must be given manually.
-    
-    Parameters:
-        name: objects name
-        Medium: media of the streams
-        eff: work efficiency of the CompIsot object. Must be 0 < eff <= 1. Defaults to 1
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium. Defaults to None   
-        F0_T: inlet temperature in [K]. Defaults to 298.15 
-        F1_T: outlet temperature in [K]. Defaults to 398.15
-        F0_P: inlet pressure in [bar]. Defaults to 1.0
-        F1_P: outlet pressure in [bar]. Defaults to 3.0 
-    
-    Attributes: 
-        R: ideal gas constant in [kJ/mol K]
-        W: work in [kJ/s]
-
-    Methods: 
-        Eqs: the outlet mol flow, composition, temperature, work and heat are determined. Returns: None
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        run_sol: empty method. Returns: the system of equations in the "Eqs" method
-
-    Notes:  
-        The size of F0_Xi and F1_Xi must be the same.
-        If no composition is given then the object will take the reference composition in the given Medium. For more
-        details go to the interfaces documentation.
-
-    Examples:
-        1) 
-        Compressor = Components.CompIsot('Compressor_example', Medium=media.Fuel_CH4(), F0_n=100, 
-        F0_Xi=np.array([0.1,1e-8,1e-8,1e-8,0.9,1e-8]), F0_T=473.15, F0_P=3.0, F1_P=6.0)
-
-    """
-    def __init__(self, name:str, Medium:media.Medium_Base, eff=1.,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=298.15, F1_P:float=3.0
-                 ):
-        super().__init__(name, Medium=Medium, eff=eff, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P, 
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
-        self.R = 8.314462618e-3
-        
-    def Eqs(self)->None:
-        self.F1.n = self.F0.n
-        self.F1.Xi = self.F0.Xi
-        self.F1.T = self.F0.T
-    
-    @property
-    def W(self):
-        return self.F0.n*self.F0.T*self.R*np.log(self.F1.P/self.F0.P)/self.eff
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        self._init_state(legacy)
 
     @property
-    def Q(self):
-        return -self.W
-
-    @property
-    def Exth(self):
-        return self.Q*(1 - 298.15/self.F0.T)
-    
-    @property
-    def Exloss(self):
-        return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.W + self.Exth
-
-    @property
-    def Sgen(self):
-        return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F0.T
-    
-    def MBcheck(self)->float:
-        # Mass balance
-        print(f"{abs((self.F0.m/self.F1.m) - 1)*100}% difference ")    
-        return self.F0.m - self.F1.m
-        
-    def run_sol(self):
-        return self.Eqs()
- 
-class CompIsent(Compressor):
-    """
-    Isentropic compressor extending from the Compressor Class. 
-    One stream is entering and one stream is coming out. 
-    The outlet n, Xi, h, cp, g, s, T are determined.
-    The real work of the CompIsent object is calculated for a given efficiency.  
-    IMPORTANT: the inlet temperature and pressure, and the outlet pressure must be given manually.
-    
-    Parameters:
-        name: objects name
-        Medium: media of the streams
-        eff: work efficiency of the CompIsent object. Must be 0 < eff <= 1. Defaults to 1
-        F0_n: inlet mol flow in [mol/s]. Defaults to 1.0
-        F1_n: outlet mol flow in [mol/s]. Defaults to 1.0
-        F0_Xi: inlet mol fraction of every component in Medium. Defaults to None  
-        F1_Xi: outlet mol fraction of every component in Medium. Defaults to None   
-        F0_T: inlet temperature in [K]. Defaults to 298.15 
-        F1_T: outlet temperature in [K]. Defaults to 398.15
-        F0_P: inlet pressure in [bar]. Defaults to 1.0
-        F1_P: outlet pressure in [bar]. Defaults to 3.0 
-    
-    Attributes: 
-        R: ideal gas constant in [kJ/mol K]
-        cpa: average cp between the inlet and outlet streams in [kJ/mol K]
-        Eq: equation to be solved
-        W: real work in [kJ/s]
-        Exloss: exergy loss in the object [kJ/s]
-        Exeff: exergy efficiency of the object. It goes between 0 and 1 
-
-    Methods: 
-        Eqs: the outlet mol flow and composition are determined. Returns: "Eq" attribute
-        MBcheck: the mass flows for every flange and the mass balance difference are calculated. Returns: float in [g/s]
-        f_sol: contains the variable to be optimized by the solver. Return: the "Eqs" method
-        run_sol: contains the optimizer function and guesses values. Returns: the solution of the optimization
-
-    Notes:  
-        The size of F0_Xi and F1_Xi must be the same.
-        If no composition is given then the object will take the reference composition in the given Medium. For more
-        details go to the interfaces documentation.
-
-    Examples:
-        1) 
-        Compressor = Components.CompIsent('Compressor_example', Medium=media.Fuel_CH4(), eff=0.7, F0_n=100, 
-        F0_Xi=np.array([0.1,1e-8,1e-8,1e-8,0.9,1e-8]), F0_T=473.15, F0_P=3.0, F1_P=6.0)
-
-    """
-    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1,
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, F0_T:float=298.15, F0_P:float=1.0,
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, F1_T:float=398.15, F1_P:float=3.0
-                 ):
-        super().__init__(name, Medium=Medium, eff=eff, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P, 
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
-        self.R = 8.314462618e-3
-        
-    def Eqs(self):
-        cpa = np.average([self.F0.cp, self.F1.cp])
-        self.F1.n = self.F0.n
-        self.F1.Xi = self.F0.Xi
-        if self.F1.P > self.F0.P:
-            eff_ratio = 1/self.eff
-        else:
-            eff_ratio = self.eff
-        self.Eq = self.F1.T - (self.F0.T + (self.F0.T*(self.F1.P/self.F0.P)**(self.R/cpa) - self.F0.T)*eff_ratio )        
-        return self.Eq
-
-    @property
-    def W(self):
-        return self.F0.n*(self.F1.h - self.F0.h)
-    
-    @property
-    def Exloss(self):
+    def Exloss(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.W
 
     @property
-    def Exeff(self):
+    def Exeff(self) -> float:
         return 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.W)
 
     @property
-    def Sgen(self):
+    def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n
-    
-    def MBcheck(self)->float:
-        # Mass balance
-        print(f"{abs((self.F0.m / self.F1.m ) - 1)*100}% difference ")    
-        return self.F0.m - self.F1.m
 
-    def f_sol(self, x):
-        self.F1.T = x[0]
-        return self.Eqs()
-        
     def run_sol(self):
-        x0 = self.F0.T*(self.F1.P/self.F0.P)**(self.R/1.3)
-        sol = spo.root(self.f_sol, x0)
-        self.f_sol(sol.x)
-        if not sol.success:
-            print(f'{self.name} Failed')
-        return sol
+        """The outlet state is explicit: evaluate ``Eqs`` and report the outlet temperature like a solver result."""
+        self.Eqs()
+        return spo.OptimizeResult(x=np.array([self.F1.T]), fun=np.zeros(1), success=True)
+
+
+class CompIsent(Compressor):
+    """
+    Adiabatic compressor with an isentropic efficiency ``eff``: ``h1 = h0 + (h1s - h0)/eff``.
+    The outlet state is explicit (real-gas isentropic outlet from the medium), so there is nothing to iterate.
+
+    Example:
+        comp = CompIsent('comp', media.Air(), eff=0.8)
+        comp.F0.T, comp.F0.P, comp.F1.P = 300., 1., 5.
+        comp.run_sol()                  # sets comp.F1.T; comp.W is the work in kJ/s
+    """
+    def Eqs(self):
+        self._path(self.eff)
+
+    @property
+    def W(self) -> float:
+        return self.F0.n*(self.F1.h - self.F0.h)
+
+
+class CompPolytropic(CompIsent):
+    """
+    Adiabatic compressor with a polytropic efficiency ``eff``.
+
+    For an ideal-gas medium (the NASA media) the polytropic path has a closed form for any cp(T): from
+    ``dh = v dP/eff`` and ``T ds = dh - v dP`` follows ``ds = (1/eff - 1) R dP/P``, so the outlet entropy is
+    ``s1 = s0 + (1/eff - 1) R ln(P1/P0)`` and one temperature solve gives the outlet. Other media (equation of
+    state, CoolProp) integrate the path in ``n_steps`` isentropic steps instead (error ~ 1/n_steps).
+    """
+    def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1.0, n_steps:int=50, **legacy):
+        super().__init__(name, Medium=Medium, eff=eff, **legacy)
+        self._n_steps = n_steps
+
+    def Eqs(self):
+        F0, F1 = self.F0, self.F1
+        if not isinstance(F0.Medium, media.Medium_NASAbase):
+            return self._path(self.eff, self._n_steps)
+        F1.n, F1.Xi = F0.n, F0.Xi
+        eff = self.eff if F1.P > F0.P else 1/self.eff
+        F1.T = F0.T
+        F1.T_sPX(F0.s + (1/eff - 1)*F0.Medium.R*np.log(F1.P/F0.P), F1.P, F0.Xi)
+
+
+class CompIsot(Compressor):
+    """
+    Isothermal compressor of an ideal gas: ``W = n*R*T*ln(P1/P0)/eff``; the work leaves as heat (``Q = -W``).
+    """
+    _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=298.15, P=3.0)}
+    R = 8.314462618e-3
+
+    def Eqs(self):
+        self.F1.n = self.F0.n
+        self.F1.Xi = self.F0.Xi
+        self.F1.T = self.F0.T
+
+    @property
+    def W(self) -> float:
+        return self.F0.n*self.F0.T*self.R*np.log(self.F1.P/self.F0.P)/self.eff
+
+    @property
+    def Q(self) -> float:
+        return -self.W
+
+    @property
+    def Exth(self) -> float:
+        return self.Q*(1 - 298.15/self.F0.T)
+
+    @property
+    def Exloss(self) -> float:
+        return super().Exloss + self.Exth
+
+    @property
+    def Sgen(self) -> float:
+        return super().Sgen - self.Q/self.F0.T
 
 
 class CompressorMapped(_MappedMixin, Compressor):
@@ -430,16 +360,12 @@ class CompressorMapped(_MappedMixin, Compressor):
         Shaft torque / Nm, set in ``Eqs``. NaN if ``omega`` is zero.
     """
     def __init__(self, name: str, comp_map: CompressorMap, Medium: media.Medium_Base,
-                 F0_n: float = 1.0, F0_Xi=None, F0_T: float = 298.15, F0_P: float = 1.0,
-                 F1_n: float = 1.0, F1_Xi=None, F1_T: float = 398.15, F1_P: float = 3.0,
-                 PR: float = 1., eta: float = 0.9, Ncorr=1., beta=0.5, Ndesign=0.,
-                 etaMech: float = 1., use_map: bool = False):
-        super().__init__(name, Medium=Medium, eff=eta, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P,
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
+                 PR: float = 1., eta: float = 0.9, Ncorr: float = 1., beta: float = 0.5, Ndesign: float = 0.,
+                 etaMech: float = 1., use_map: bool = False, **legacy):
+        super().__init__(name, Medium=Medium, eff=eta, **legacy)
 
         # Stored with a leading underscore so ModelBase.to_dict()/to_json() skip the map object
         self._comp_map = comp_map
-        self.__F = interfaces.Flange(name + '.F1_iso', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P)
 
         self.Ncorr = Ncorr
         self.beta = beta
@@ -477,12 +403,9 @@ class CompressorMapped(_MappedMixin, Compressor):
         .. math:: P_{shaft} = \\dot{n} (h_1 - h_0) / \\eta_{mech}
         """
         PR, eta = self._operating_point()
-        self.F1.n = self.F0.n
-        self.F1.Xi = self.F0.Xi
         self.F1.P = self.F0.P*PR
-        self.__F.T_sPX(self.F0.s, self.F1.P, self.F1.Xi)
-        self.h_real = (self.__F.h - self.F0.h)/eta + self.F0.h
-        self.F1.T_hx(self.h_real, self.F1.Xi)
+        self._path(eta)
+        self.h_real = self.F1.h
         self.Pshaft = self.F0.n*(self.F1.h - self.F0.h)*1e3/self.etaMech   # W
         self.tau = self.Pshaft/self.omega if self.omega > 0 else np.nan
 
@@ -497,7 +420,7 @@ class CompressorMapped(_MappedMixin, Compressor):
         return out
 
 
-class Turbine(ModelBase):
+class Turbine(_RealGasPath, ModelBase):
     """
     Base turbine model with one inlet flange (F0) and one outlet flange (F1).
 
@@ -509,17 +432,14 @@ class Turbine(ModelBase):
         Medium (fluid) model of the streams.
     eff : float, optional
         Work efficiency, 0 < eff <= 1. Currently not used to build the flanges.
-    F0_n, F0_Xi, F0_T, F0_P
-        Inlet molar flow / mol/s, composition, temperature / K, pressure / bar.
-    F1_n, F1_Xi, F1_T, F1_P
-        Outlet molar flow / mol/s, composition, temperature / K, pressure / bar.
     """
-    def __init__(self, name: str, Medium: media.Medium_Base, eff: float = None,
-                 F0_n: float = 1.0, F0_Xi: npArray[np.float64] | None = None, F0_T: float = 298.15, F0_P: float = 1.0,
-                 F1_n: float = 1.0, F1_Xi: npArray[np.float64] | None = None, F1_T: float = 398.15, F1_P: float = 3.0):
+    _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=398.15, P=3.0)}
+
+    def __init__(self, name: str, Medium: media.Medium_Base, eff: float = None, **legacy):
         super().__init__(locals())
-        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P)
-        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P)
+        self.F0 = interfaces.Flange(name + '.F0', Medium=Medium)
+        self.F1 = interfaces.Flange(name + '.F1', Medium=Medium)
+        self._init_state(legacy)
 
 
 class TurbineMapped(_MappedMixin, Turbine):
@@ -577,17 +497,13 @@ class TurbineMapped(_MappedMixin, Turbine):
         Shaft torque / Nm, set in ``Eqs``. NaN if ``omega`` is zero.
     """
     def __init__(self, name: str, turb_map: TurbineMap, Medium: media.Medium_Base,
-                 F0_n: float = 1.0, F0_Xi=None, F0_T: float = 298.15, F0_P: float = 1.0,
-                 F1_n: float = 1.0, F1_Xi=None, F1_T: float = 398.15, F1_P: float = 3.0,
-                 PR: float = 1., eta: float = 1., Ncorr=1., beta=0.5, Ndesign=0., etaMech: float = 1.,
+                 PR: float = 1., eta: float = 1., Ncorr: float = 1., beta: float = 0.5, Ndesign: float = 0., etaMech: float = 1.,
                  Mach_out: float = 0.2, A_exit: float = None, blockage: float = 0.03,
-                 use_map: bool = True):
-        super().__init__(name, Medium=Medium, F0_n=F0_n, F0_Xi=F0_Xi, F0_T=F0_T, F0_P=F0_P,
-                         F1_n=F1_n, F1_Xi=F1_Xi, F1_T=F1_T, F1_P=F1_P)
+                 use_map: bool = True, **legacy):
+        super().__init__(name, Medium=Medium, **legacy)
 
         # Stored with a leading underscore so ModelBase.to_dict()/to_json() skip the map object
         self._turb_map = turb_map
-        self.__F = interfaces.Flange(name + '.F1_iso', Medium=Medium, n=F1_n, Xi=F1_Xi, T=F1_T, P=F1_P)
 
         self.Ncorr = Ncorr
         self.beta = beta
@@ -677,17 +593,14 @@ class TurbineMapped(_MappedMixin, Turbine):
         which is negative when the turbine delivers power.
         """
         PR, eta = self._operating_point()
-        self.F1.n = self.F0.n
-        self.F1.Xi = self.F0.Xi
         self.F1.P = self.F0.P/PR
-        self.__F.T_sPX(self.F0.s, self.F1.P, self.F1.Xi)       # isentropic outlet
-        self.h_real = (self.__F.h - self.F0.h)*eta + self.F0.h
-        self.F1.T_hx(self.h_real, self.F1.Xi)
+        self._path(eta)
+        self.h_real = self.F1.h
         self.Pshaft = self.F0.n*(self.F1.h - self.F0.h)*1e3*self.etaMech   # W, negative = power delivered
         self.tau = self.Pshaft/self.omega if self.omega > 0 else np.nan
 
     def solve_design_PR(self, Pshaft_target: float,
-                        PR_bounds=(1.001, 50.), xtol=1e-12, verbose: int = 0):
+                        PR_bounds=(1.001, 50.), xtol: float = 1e-12, verbose: int = 0):
         """
         Find the pressure ratio that delivers a target shaft power.
 

@@ -13,16 +13,20 @@ class RStoic(ModelBase): #base.ModelBase
     3C2H6 + H2O -> 5CH4 + CO
     3C3H8 + 2H2O -> 7CH4 + 2CO
     3C4H10 + 3H2O -> 9CH4 + 3CO
+
+    Parameters: T, P: reactor temperature [K] and pressure [bar] (all ports). The steam (FH0) follows from the feed.
+    Operating state: feed on ``F0``. Deprecated: F0_n, F0_Xi, F1_n, F1_Xi (set the state on the flanges), Q.
     '''
     
-    def __init__(self, name, Medium, T=500, P=23, Q=0,
-                 F0_n=1e-5, F0_Xi=None, F1_n=1e-5, F1_Xi=None,
-                ):
-        
-        super().__init__ (locals()) #name, Medium=Medium, T=T, P=P, F0_n=F0_n, F0_Xi=F0_Xi, F1_n=F1_n, F1_Xi=F1_Xi, Q=Q
-        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Water(), n=1, Xi=np.array([1]), T=T, P=P, phase='Gas') # H2 in
-        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=T, P=P, phase='Gas')
-        self.F1 = interFT.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=T, P=P, phase='Gas')
+    _default_state = {'F0': dict(n=1e-5), 'F1': dict(n=1e-5)}
+
+    def __init__(self, name, Medium, T=500, P=23, **legacy):
+        legacy.pop('Q', None)                       # former keyword without effect: Q follows from the balance
+        super().__init__(locals())
+        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Water(), Xi=np.array([1]), T=T, P=P, phase='Gas') # steam in
+        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, T=T, P=P, phase='Gas')
+        self.F1 = interFT.Flange(name + '.F1', Medium=Medium, T=T, P=P, phase='Gas')
+        self._init_state(legacy)
 
     def Eqs(self):   
         index = np.concatenate(([0,1,4], np.arange(9,55)))
@@ -36,7 +40,7 @@ class RStoic(ModelBase): #base.ModelBase
             [(self.F0.n*self.F0.Xi[5] + self.F0.n*(np.dot(self.F0.Xi[[6,7,8]], [5,7,9])/3)) - self.F1.n*self.F1.Xi[5]], # CH4    
             
         ))
-        self.Q = (self.F1.n*self.F1.h - (self.F0.n*self.F0.n +  self.FH0.n*self.FH0.n))
+        self.Q = self.F1.n*self.F1.h - (self.F0.n*self.F0.h + self.FH0.n*self.FH0.h)   # heat duty, kW
         
         return self.Eq
     
@@ -50,9 +54,6 @@ class RStoic(ModelBase): #base.ModelBase
         return MB
     
     def ExBs(self):
-        self.FH0.ExBs()
-        self.F0.ExBs()
-        self.F1.ExBs()
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss = self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
         self.Exeff = 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.FH0.n*self.FH0.Ex + np.maximum(0, self.Exth)) 
@@ -118,30 +119,23 @@ class FT(ModelBase):
         run_sol: empty method. Returns: the system of equations in the "Eqs" method
     
     Examples:
-        FT = FT.reactorsFT('FT_example', Medium=mediaFT.Syncrude(), alpha=0.92, CO_conv=0.4,
-        F0_n=100, F0_Xi=mediaFT.Syncrude()._reference_X, T=473.15, P=30.0)
+        ft = reactorsFT.FT('FT_example', Medium=mediaFT.Syncrude(), alpha=0.92, CO_conv=0.4, T=473.15, P=30.0)
+        ft.F0.n, ft.F0.Xi = 100, mediaFT.Syncrude()._reference_X
 
     """
     
-    def __init__(self, name:str, Medium:mediaFT.Syncrude=mediaFT.Syncrude(), alpha:float=None, CO_conv:float=None, 
-                 F0_n:float=1.0, F0_Xi:npArray[np.float64]|None=None, T:float=450, P:float=30, phase0:Literal['Gas', 'Liquid']='Gas',
-                 F1_n:float=1.0, F1_Xi:npArray[np.float64]|None=None, phase1:Literal['Gas', 'Liquid']='Gas', 
-                 F2_n:float=1.0, F2_Xi:npArray[np.float64]|None=None, phase2:Literal['Gas', 'Liquid']='Liquid'):     
-        super().__init__(locals())  
-        
-        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=T, P=P, phase=phase0)
-        self.F1 = interFT.Flange(name + '.F1', Medium=Medium, n=F1_n, Xi=F1_Xi, T=T, P=P, phase=phase1) 
-        self.F2 = interFT.Flange(name + '.F2', Medium=Medium, n=F2_n, Xi=F2_Xi, T=T, P=P, phase=phase2) 
+    def __init__(self, name:str, Medium:mediaFT.Syncrude=mediaFT.Syncrude(), alpha:float=None, CO_conv:float=None,
+                 T:float=450, P:float=30, phase0:Literal['Gas', 'Liquid']='Gas', phase1:Literal['Gas', 'Liquid']='Gas',
+                 phase2:Literal['Gas', 'Liquid']='Liquid', **legacy):
+        super().__init__(locals())
+        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, T=T, P=P, phase=phase0)
+        self.F1 = interFT.Flange(name + '.F1', Medium=Medium, T=T, P=P, phase=phase1)
+        self.F2 = interFT.Flange(name + '.F2', Medium=Medium, T=T, P=P, phase=phase2)
         self.alpha = alpha
         self.CO_conv = CO_conv
-        self.__ASF = self.HC_dist() 
-        self.F0.T = T
-        self.F1.T = T
-        self.F2.T = T
-        self.F0.P = P
-        self.F1.P = P
-        self.F2.P = P
-        
+        self.__ASF = self.HC_dist()
+        self._init_state(legacy)
+
     def Eqs(self):
         
         # H2 balance check       
@@ -200,9 +194,6 @@ class FT(ModelBase):
         return MB
         
     def ExBs(self)->None:
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
         self.Exth:float = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth
         self.Exeff:float = 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))      
@@ -211,18 +202,21 @@ class FT(ModelBase):
         return self.Eqs()   
 
 class Dist(components.GPUbase):
-    def __init__(self, name, Medium, eff=1.,
-                 F0_n=1, F0_Xi=np.zeros(55), 
-                 F0_T=400, F0_P=1, phase0='Gas',
-                 F1_T=400, F1_P=1, phase1='Liquid',
-                 F2_T=400, F2_P=1, phase2='Liquid',
-                 F3_T=400, F3_P=1, phase3='Liquid',
-                ):       
+    """
+    Distillation of a syncrude feed (F0) into naphtha (F1, C5-C10), kerosene (F2) and distillate (F3).
+    Operating state: feed on ``F0``; outlet temperatures and pressures on F1-F3 (default 400 K, 1 bar).
+    Deprecated: the state keywords F0_n, F0_Xi, F0_T, ..., F3_P (set the state on the flanges).
+    """
+    _default_state = {'F0': dict(n=1.0, Xi=np.zeros(55), T=400.0), 'F1': dict(T=400.0), 'F2': dict(T=400.0),
+                      'F3': dict(T=400.0)}
+
+    def __init__(self, name, Medium, eff=1., phase0='Gas', phase1='Liquid', phase2='Liquid', phase3='Liquid', **legacy):
         super().__init__(name, eff, locals())
-        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P, phase=phase0)
-        self.F1 = interFT.Flange(name + '.Naphtha', Medium=mediaFT.Naphtha(), n=1, Xi=np.zeros(6), T=F1_T, P=F1_P, phase=phase1) # naphtha C5-C10
-        self.F2 = interFT.Flange(name + '.Kerosene', Medium=mediaFT.Kerosene(), n=1, Xi=np.zeros(4), T=F2_T, P=F2_P, phase=phase2) # kerosene
-        self.F3 = interFT.Flange(name + '.Distillate', Medium=mediaFT.Distillate(), n=1, Xi=np.zeros(8), T=F3_T, P=F3_P, phase=phase3) #distillate
+        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, phase=phase0)
+        self.F1 = interFT.Flange(name + '.Naphtha', Medium=mediaFT.Naphtha(), Xi=np.zeros(6), phase=phase1)        # naphtha C5-C10
+        self.F2 = interFT.Flange(name + '.Kerosene', Medium=mediaFT.Kerosene(), Xi=np.zeros(4), phase=phase2)      # kerosene
+        self.F3 = interFT.Flange(name + '.Distillate', Medium=mediaFT.Distillate(), Xi=np.zeros(8), phase=phase3)  # distillate
+        self._init_state(legacy)
 
     def Eqs(self):
         self.Eq = np.concatenate((
@@ -250,10 +244,6 @@ class Dist(components.GPUbase):
         return MB
     
     def ExBs(self):
-        self.F0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
-        self.F3.ExBs()
         self.Wid = self.F3.n*self.F3.Ex + self.F2.n*self.F2.Ex + self.F1.n*self.F1.Ex - self.F0.n*self.F0.Ex
         self.W = float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
     
@@ -287,25 +277,24 @@ class Hydrocracker(ModelBase):
     25 wt%: lights(C1-C4) 2% + naphtha(C5-C10) 23%
     50 wt%: kerosene(C11-C14)
     25 wt%: Distillate (C15-C22)
+
+    Operating state: wax on ``F0``, hydrogen on ``FH0`` (all ports default to 400 K, 1 bar).
+    Deprecated: the state keywords F0_n, F0_Xi, F0_T, ..., F4_P (set the state on the flanges).
     """
         
-    def __init__(self, name, Medium, F0_Xi=None, 
-                 F0_n=1, F0_T=400, F0_P=1, phase0='Liquid',
-                 FH0_n=1, FH0_T=400, FH0_P=1, # Hydrogen in
-                 F1_n=1, F1_T=400, F1_P=1, phase1='Gas', # light gases
-                 F2_n=1, F2_T=400, F2_P=1, phase2='Gas',  # Naphtha
-                 F3_n=1, F3_T=400, F3_P=1, phase3='Gas',  # Kerosene
-                 F4_n=1, F4_T=400, F4_P=1, phase4='Gas'):  # Distillates
+    _default_state = {port: dict(T=400.0) for port in ('F0', 'FH0', 'F1', 'F2', 'F3', 'F4')}
+
+    def __init__(self, name, Medium, phase0='Liquid', phase1='Gas', phase2='Gas', phase3='Gas', phase4='Gas', **legacy):
         super().__init__(locals())
-        
-        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, n=F0_n, Xi=F0_Xi, T=F0_T, P=F0_P, phase=phase0) # change to wax      
-        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Hydrogen(), n=FH0_n, Xi=np.array([1]), T=FH0_T, P=FH0_P, phase='Gas') # H2 in
-        self.F1 = interFT.Flange(name + '.LightGas', Medium=mediaFT.LightGas(), n=F1_n, Xi=self.equiMol(mediaFT.LightGas()), T=F1_T, P=F1_P, phase=phase1) # Light gases C1-C4
-        self.F2 = interFT.Flange(name + '.Naphtha', Medium=mediaFT.Naphtha(), n=F2_n, Xi=self.equiMol(mediaFT.Naphtha()), T=F2_T, P=F2_P, phase=phase2) # naphtha 
-        self.F3 = interFT.Flange(name + '.Kerosene', Medium=mediaFT.Kerosene(), n=F3_n, Xi=self.equiMol(mediaFT.Kerosene()), T=F3_T, P=F3_P, phase=phase3) # kerose
-        self.F4 = interFT.Flange(name + '.Distillate', Medium=mediaFT.Distillate(), n=F4_n, Xi=self.equiMol(mediaFT.Distillate()), T=F4_T, P=F4_P, phase=phase4) #distillate     
+        self.F0 = interFT.Flange(name + '.F0', Medium=Medium, phase=phase0) # wax
+        self.FH0 = interFT.Flange(name + '.FH0', Medium=mediaFT.Hydrogen(), Xi=np.array([1]), phase='Gas') # hydrogen in
+        self.F1 = interFT.Flange(name + '.LightGas', Medium=mediaFT.LightGas(), Xi=self.equiMol(mediaFT.LightGas()), phase=phase1) # light gases C1-C4
+        self.F2 = interFT.Flange(name + '.Naphtha', Medium=mediaFT.Naphtha(), Xi=self.equiMol(mediaFT.Naphtha()), phase=phase2) # naphtha
+        self.F3 = interFT.Flange(name + '.Kerosene', Medium=mediaFT.Kerosene(), Xi=self.equiMol(mediaFT.Kerosene()), phase=phase3) # kerosene
+        self.F4 = interFT.Flange(name + '.Distillate', Medium=mediaFT.Distillate(), Xi=self.equiMol(mediaFT.Distillate()), phase=phase4) # distillate
         self.__MassFrac = np.array([0.02, 0.23, 0.5]) #, 0.25
-        
+        self._init_state(legacy)
+
     def Eqs(self): 
         
         # self.m0 = self.F0.n*self.F0.mw 
@@ -353,12 +342,6 @@ class Hydrocracker(ModelBase):
         return MB
     
     def ExBs(self):
-        self.F0.ExBs()
-        self.FH0.ExBs()
-        self.F1.ExBs()
-        self.F2.ExBs()
-        self.F3.ExBs()
-        self.F4.ExBs()
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
         self.Exloss = (self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex 
                         - self.F2.n*self.F2.Ex - self.F3.n*self.F3.Ex - self.F4.n*self.F4.Ex + self.Exth)

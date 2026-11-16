@@ -6,3 +6,4 @@ build/
 **/.ipynb_checkpoints
 .vscode
 .mirror.*.env
+.pytest_cache/

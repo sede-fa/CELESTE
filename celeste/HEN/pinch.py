@@ -4,6 +4,26 @@ import matplotlib.pyplot as plt
 
 
 class PinchAnalyser:
+    """
+    Pinch analysis (problem table algorithm) of a set of hot and cold streams.
+
+    Parameters
+    ----------
+    segments : DataFrame with one row per stream segment and the columns
+               ``segment_type`` ('sensible' | 'latent'), ``side`` ('hot' | 'cold'),
+               ``T_in``, ``T_out`` [degC] and ``CP`` [kW/K] for sensible segments,
+               ``T_phase`` [degC] and ``Q`` [kW] for latent (isothermal) segments.
+               The segment name is the index or a column ``segment_id``.
+               ``SysBase.pinch_stream_table()`` builds this table from a solved system.
+    dt_min   : minimum temperature difference between hot and cold streams [K]
+
+    Usage
+    -----
+    >>> pa = PinchAnalyser(system.pinch_stream_table(), dt_min=10).solve()
+    >>> pa.summary()                 # minimum utilities, heat recovery, pinch temperatures
+    >>> pa.plot_summary()            # composite curves and grand composite curve
+    >>> PinchAnalyser.sweep_dt_min(table)   # targets as a function of dt_min
+    """
 
     REQUIRED_COLUMNS = {
         "segment_id",
@@ -100,6 +120,9 @@ class PinchAnalyser:
         # ── 1. Copy & normalise column names ────────────────────────────────
         out = segments.copy()
         out.columns = out.columns.str.strip()
+        if "segment_id" not in out.columns:
+            # the stream names may also be the index, as returned by SysBase.pinch_stream_table()
+            out = out.rename_axis("segment_id").reset_index()
 
         # ── 2. Required columns present ─────────────────────────────────────
         for col in ("T_in", "T_out", "CP", "T_phase", "Q"):
