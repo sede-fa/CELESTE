@@ -100,26 +100,20 @@ class MethanolLoop(SysBase):
         self.purge_out = flow.Sink(name + '.purge_out', gas)
         self.product = flow.Sink(name + '.product', self.cond.F2.Medium)
 
-    def seq_sol(self, store: bool = False) -> None:
-        self.connect_seq(self.feed.F1, self.mix.F0, store=store)
-        self.solve(self.mix)
-        self.connect_seq(self.mix.F2, self.preheat.F0, store=store)
-        self.solve(self.preheat)
-        self.connect_seq(self.preheat.F1, self.reactor.F0, store=store)
-        self.solve(self.reactor)
-        self.connect_seq(self.reactor.F1, self.cond.F0, store=store)
-        self.cond.seq_sol(store=store)
-        self.connect_seq(self.cond.F1, self.split.F0, store=store)
-        self.solve(self.split)
-        self.connect_seq(self.split.F2, self.purge_out.F0, store=store)
-        self.connect_seq(self.cond.F2, self.product.F0, store=store)
-        if store:   # the recycle closes the loop (shown in the graph; converged by run_sol)
-            self.connect_seq(self.split.F1, self.mix.F1, store=True)
+        # the flowsheet: solve order and tear stream (split.F1 -> mix.F1) are generated (print_solve_order())
+        self.link(self.feed.F1, self.mix.F0)
+        self.link(self.mix.F2, self.preheat.F0)
+        self.link(self.preheat.F1, self.reactor.F0)
+        self.link(self.reactor.F1, self.cond.F0)
+        self.link(self.cond.F1, self.split.F0)
+        self.link(self.split.F1, self.mix.F1)          # recycle
+        self.link(self.split.F2, self.purge_out.F0)
+        self.link(self.cond.F2, self.product.F0)
 
     def run_sol(self, eps: float = 1e-9, max_iter: int = 300, method: str = 'anderson'):
-        """Converge the recycle (tear stream: mixer inlet F1). Returns (passes, relative error of the tear stream)."""
-        return self.Recycle_Tear(self.split.F1, self.mix.F1, flow_method='seq_sol', eps=eps, max_iter=max_iter,
-                                 method=method)
+        """Converge the loop. Returns (passes, relative error of the tear stream)."""
+        result = self.auto_sol(eps=eps, max_iter=max_iter, method=method)
+        return next(iter(result.values()))
 
     @property
     def recycle_ratio(self) -> float:

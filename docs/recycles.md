@@ -19,7 +19,46 @@ class Loop(SysBase):
 ```
 
 `Recycle_Tear(F_source, F_sink, ...)` returns `(passes, error)` and warns with a
-`ConvergenceWarning` if `max_iter` passes are not enough.
+`ConvergenceWarning` if `max_iter` passes are not enough. Several tear streams
+are converged together when both arguments are lists of flanges.
+
+## Declaring the flowsheet instead
+
+A system can list its streams once and leave the solve order to CELESTE:
+
+```python
+class Loop(SysBase):
+    def __init__(self, name):
+        super().__init__(locals())
+        ...                                           # units
+        self.link(self.feed.F1, self.mix.F0)
+        self.link(self.mix.F2, self.reactor.F0)
+        ...
+        self.link(self.split.F1, self.mix.F1)         # recycle - declared like any other stream
+```
+
+No `seq_sol` or `run_sol` is written. `solve_order()` builds the unit graph,
+finds the loops (strongly connected components), tears the fewest streams that
+break every loop and orders the units; `print_solve_order()` shows the plan:
+
+```
+1. loop.feed
+2. loop [loop.mix, loop.preheat, loop.reactor, loop.cond, loop.split]  tear: loop.split.F1 -> loop.mix.F1
+3. loop.product
+4. loop.purge_out
+```
+
+`run_sol()` (or `auto_sol(eps=, max_iter=, method=)`) runs it, converging every
+loop with `Recycle_Tear` on its tear streams. Among equally small sets of tears
+the streams that run back against the flow (towards the feeds) are preferred.
+`create_graph` draws a declared flowsheet without solving it.
+
+A system that already has a hand-written `seq_sol` does not need the `link` calls typed again: run it once and
+`links_from_run()` declares the streams from the `connect_seq` and `Recycle_Tear` calls of that run
+(in the order they were made), after which `solve_order()`, `auto_sol()` and `pfd()` work as for a declared flowsheet.
+Connections made inside a subsystem belong to the subsystem: call `links_from_run()` on it.
+`ProcessBoxes.MethanolLoop` is written this way; systems with their own
+`seq_sol` are unchanged.
 
 ## What is converged
 

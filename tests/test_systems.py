@@ -237,3 +237,151 @@ def test_compression_train_with_other_compressors_and_pressure_ratio():
     ref = ComponentModels.SimpleCompressorSys('s', 1.0, None, 300.0, 1.0, 5.0, eff=0.8)
     ref.run_sol()
     assert cs.compressor.F1.T > ref.compressor.F1.T
+
+
+# ---- flowsheets declared by their streams --------------------------------------------------------------
+
+class _TwoRecycles(SysBase):
+    """feed -> mix1 -> mix2 -> heater -> split2 -> split1 -> product; split2.F1 -> mix2, split1.F1 -> mix1."""
+    def __init__(self, name, declared=True):
+        super().__init__(locals())
+        gas = media.Air()
+        self.feed = flow.SourceM(name + '.feed', gas, F1_n=1.0, F1_Xi=np.array([0.21, 0.79]), F1_T=300.0, F1_P=1.0)
+        self.mix1 = flow.Mixer(name + '.mix1', gas)
+        self.mix2 = flow.Mixer(name + '.mix2', gas)
+        self.heater = heat.Heater(name + '.heater', gas)
+        self.heater.F1.T = 500.0
+        self.split2 = flow.Splitter(name + '.split2', gas, Split=0.4)
+        self.split1 = flow.Splitter(name + '.split1', gas, Split=0.3)
+        self.out = flow.Sink(name + '.out', gas)
+        for f in (self.mix1.F1, self.mix2.F1):
+            f.n, f.T = 1e-6, 300.0
+        if declared:
+            self.link(self.feed.F1, self.mix1.F0)
+            self.link(self.mix1.F2, self.mix2.F0)
+            self.link(self.mix2.F2, self.heater.F0)
+            self.link(self.heater.F1, self.split2.F0)
+            self.link(self.split2.F2, self.split1.F0)
+            self.link(self.split2.F1, self.mix2.F1)
+            self.link(self.split1.F1, self.mix1.F1)
+            self.link(self.split1.F2, self.out.F0)
+
+    def hand_pass(self):
+        self.connect_seq(self.feed.F1, self.mix1.F0)
+        self.solve(self.mix1)
+        self.connect_seq(self.mix1.F2, self.mix2.F0)
+        self.solve(self.mix2)
+        self.connect_seq(self.mix2.F2, self.heater.F0)
+        self.solve(self.heater)
+        self.connect_seq(self.heater.F1, self.split2.F0)
+        self.solve(self.split2)
+        self.connect_seq(self.split2.F2, self.split1.F0)
+        self.solve(self.split1)
+        self.connect_seq(self.split1.F2, self.out.F0)
+
+
+def test_declared_flowsheet_generates_order_and_tears():
+    sys_ = _TwoRecycles('t')
+    plan = sys_.solve_order()
+    assert [len(step.units) for step in plan] == [1, 5, 1]
+    assert len(plan[1].tears) == 1 and 'loop' in sys_.print_solve_order()
+    sys_.run_sol()
+    # every recycle closed: out = feed, and the heater carries feed/(0.7*0.6) ... checked against a hand solution
+    ref = _TwoRecycles('r', declared=False)
+    ref.Recycle_Tear([ref.split2.F1, ref.split1.F1], [ref.mix2.F1, ref.mix1.F1], flow_method='hand_pass', eps=1e-10)
+    assert sys_.out.F0.n == pytest.approx(1.0, rel=1e-8) and sys_.heater.F0.n == pytest.approx(ref.heater.F0.n, rel=1e-8)
+    assert sys_.heater.F0.n == pytest.approx(1.0/(0.6*0.7), rel=1e-7)
+    assert sys_.EBcheck() == pytest.approx(0.0, abs=1e-6)
+    assert 't.split1 --F1_F1--> t.mix1' in sys_.create_graph('mermaid', save=False)
+
+
+def test_links_from_a_hand_written_run_give_the_declared_flowsheet():
+    ref = _TwoRecycles('r', declared=False)
+    ref.Recycle_Tear([ref.split2.F1, ref.split1.F1], [ref.mix2.F1, ref.mix1.F1], flow_method='hand_pass', eps=1e-10)
+    pairs = ref.links_from_run()
+    assert len(pairs) == 8 and len(ref.streams) == 8
+    declared = _TwoRecycles('d')
+    assert [len(step.units) for step in ref.solve_order()] == [len(step.units) for step in declared.solve_order()]
+    ref.mix1.F1.n, ref.mix2.F1.n = 1e-6, 1e-6
+    ref.run_sol()                                          # generated order and tears from the recorded streams
+    declared.run_sol()
+    assert ref.heater.F0.n == pytest.approx(declared.heater.F0.n, rel=1e-8)
+
+
+def test_iterate_flange_of_the_system_is_not_a_stream_of_its_own():
+    class Chain(SysBase):
+        def __init__(self, name):
+            super().__init__(locals())
+            gas = media.Air()
+            self.a = heat.Heater(name + '.a', gas)
+            self.b = heat.Heater(name + '.b', gas)
+            self.guess = interfaces.Flange(name + '.guess', gas)          # iterate of a tear stream: a.F1 -> guess -> b.F0
+            self.getObjs()
+
+    chain = Chain('c')
+    chain.connect_seq(chain.a.F1, chain.guess)
+    chain.connect_seq(chain.guess, chain.b.F0)
+    assert chain.links_from_run() == [(chain.a.F1, chain.b.F0)]
+
+
+def test_declared_flowsheet_rejects_foreign_flanges():
+    sys_ = _TwoRecycles('t')
+    other = flow.Sink('x', media.Air())
+    sys_.link(sys_.split1.F2, other.F0)
+    with pytest.raises(ValueError, match='does not belong'):
+        sys_.solve_order()
+
+
+def test_design_specs():
+    from celeste.CSL import reactors
+    from celeste.CSL.systems import ProcessBoxes
+
+    class Reforming(SysBase):
+        def __init__(self, name):
+            super().__init__(locals())
+            gas = media.Fuel_CH4()
+            self.source1 = flow.SourceM('source1', gas, 1, np.array([0.01, 0.3, 0.2, 1e-5, 0.5, 1e-5]), 973.15, 5.)
+            self.reformer = reactors.MR('reformer', gas, T=973.15)
+            self.sink1 = flow.Sink('sink1', gas)
+            self.link(self.source1.F1, self.reformer.F0)
+            self.link(self.reformer.F1, self.sink1.F0)
+
+    r = Reforming('r')
+    r.add_spec('sink1.F0.n', 2.0, vary='source1.F1.n', bounds=(0.1, 10.0))
+    assert r.solve_specs().success and r.sink1.F0.n == pytest.approx(2.0, rel=1e-8)
+    assert list(r.specs['vary']) == ['source1.F1.n'] and r.specs['current'][0] == pytest.approx(2.0)
+    # two specifications at once, one of them a function of the system
+    r.add_spec(lambda s: s.sink1.F0.Xi[0], 0.45, vary='reformer.T', bounds=(800.0, 1200.0), name='H2 fraction')
+    assert r.solve_specs().success
+    assert r.sink1.F0.n == pytest.approx(2.0, rel=1e-7) and r.sink1.F0.Xi[0] == pytest.approx(0.45, rel=1e-7)
+    r.clear_specs()
+    with pytest.raises(ValueError):
+        r.solve_specs()
+    with pytest.raises(AttributeError):
+        r.add_spec('sink1.F0.n', 1.0, vary='source1.nothing')
+    # a recycle loop: purge fraction for a given carbon efficiency
+    loop = ProcessBoxes.MethanolLoop('m')
+    loop.add_spec('carbon_efficiency', 0.92, vary='split.split', bounds=(0.9, 0.999))
+    assert loop.solve_specs().success and loop.carbon_efficiency == pytest.approx(0.92, abs=1e-7)
+
+
+def test_pfd(tmp_path):
+    import json
+    import re
+    from celeste.CSL.systems import ProcessBoxes
+    loop = ProcessBoxes.MethanolLoop('m')
+    drawn = loop.pfd()                                   # declared flowsheet: drawn without solving
+    assert '8 units, 8 streams, 1 recycle' in drawn.html and 'class="stream recycle"' in drawn.html
+    loop.run_sol()
+    path = loop.pfd(str(tmp_path/'m.html')).save(str(tmp_path/'m2.html'))
+    page = open(path, encoding='utf-8').read()
+    tips = json.loads(re.search(r'const TIPS = (\{.*?\});\n', page).group(1))
+    stream = next(v for v in tips.values() if 'split.F1' in v and 'mix.F1' in v)
+    assert 'mole fractions' in stream and 'CH3OH' in stream
+    assert any('Ex loss' in v and 'MeOH' in v for v in tips.values())
+    assert '<iframe srcdoc=' in drawn._repr_html_()
+    soc = SOCsystem.SOCsysRecupe('s', I=-50.0)           # hand-written seq_sol: drawn from the last run
+    with pytest.raises(ValueError, match='nothing to draw'):
+        soc.pfd()
+    soc.run_sol()
+    assert '2 recycle' in soc.pfd().html

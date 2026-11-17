@@ -9,6 +9,9 @@ from ._mixin.introspection import IntrospectionMixin
 from ._mixin.graph import GraphMixin
 from ._mixin.analysis import ReportingMixin
 from ._mixin.recycle import RecycleMixin
+from ._mixin.flowsheet import FlowsheetMixin
+from ._mixin.specs import SpecMixin
+from ._mixin.pfd import PFDMixin
 
 from typing import Any
 from numpy._typing._array_like import NDArray
@@ -174,7 +177,7 @@ class ModelBase(Base):
         return m_in - m_out
 
 
-class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, ModelBase):
+class SysBase(FlowsheetMixin, SpecMixin, PFDMixin, GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, ModelBase):
     _is_system=True
     def __init__(self, args): # name,
         super().__init__(args) #
@@ -231,7 +234,7 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
         self._record_link(pin1, pin2)
 
         if store:
-            self.connections.append(['.'.join(pin1.name.split('.')[:-1]), pin1.name.split('.')[-1], pin2.name.split('.')[-1], '.'.join(pin2.name.split('.')[:-1])])
+            self._store_connection(pin1, pin2)
         
         for var in pin1._pin_vars:
             if var in pin1._flow_vars:
@@ -244,6 +247,11 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
                     setattr(pin1, var, getattr(pin2, var))
                 else:
                     setattr(pin2, var, getattr(pin1, var))
+
+    def _store_connection(self, pin1: Flange, pin2: Flange) -> None:
+        """Record a connection for the graphs (``create_graph``): [unit, port, port, unit]."""
+        self.connections.append(['.'.join(pin1.name.split('.')[:-1]), pin1.name.split('.')[-1],
+                                 pin2.name.split('.')[-1], '.'.join(pin2.name.split('.')[:-1])])
 
     def solve(self, *units: ModelBase) -> None:
         '''Run the solver of each unit and keep its result as ``unit._sol`` (read by ``get_success``).'''
@@ -262,10 +270,14 @@ class SysBase(GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, Mode
     def seq_sol(self, store: bool = False) -> None:
         """
         Sequential-modular solution of the system: connect the units in flow
-        order with ``connect_seq`` and call their ``run_sol``. Implemented by
-        every concrete system.
+        order with ``connect_seq`` and call their ``run_sol``. A system that declares
+        its streams with ``link`` gets this generated (``solve_order``, ``auto_sol``);
+        otherwise every concrete system implements it.
         """
-        raise NotImplementedError(f"{type(self).__name__} does not implement seq_sol()")
+        if self.streams:
+            self.auto_sol(store=store)
+            return
+        raise NotImplementedError(f"{type(self).__name__} declares no streams (link) and does not implement seq_sol()")
 
     def run_sol(self):
         """Solve the system (default: one sequential-modular pass)."""

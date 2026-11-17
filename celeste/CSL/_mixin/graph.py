@@ -79,7 +79,11 @@ class GraphMixin:
             ValueError: If an unsupported graph type is specified.
         """
         self.connections = []
-        self.seq_sol(store=True)
+        if self.streams:                                   # declared flowsheet: no need to solve it
+            for outlet, inlet in self.streams:
+                self._store_connection(outlet, inlet)
+        else:
+            self.seq_sol(store=True)
         if graph_type.lower() == "networkx":
             return self.make_networkx_graph()
         elif graph_type.lower() == "mermaid":

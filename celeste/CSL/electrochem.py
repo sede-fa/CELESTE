@@ -45,10 +45,13 @@ class _FuelStack(ModelBase):
     '''
     ELEMENTS = eq.FUEL_ELEMENTS                       # rows C, H, O, N
 
-    def __init__(self, name: str, MediumF: media.Medium_Base, MediumA: media.Medium_Base, T_in, P_in, T, Q, V_model, n_nodes, **params):
+    def __init__(self, name: str, MediumF: media.Medium_Base, MediumA: media.Medium_Base, T_in, P_in, T, Q, V_model, n_nodes,
+                 ASR_T: str = 'fuel', **params):
         if V_model not in ('mean', 'outlet', 'average', 'streams'):
             raise ValueError(f"{name}: V_model must be 'mean', 'outlet', 'average' or 'streams', not {V_model!r}")
-        super().__init__(dict(name=name, V_model=V_model, n_nodes=n_nodes, **params))
+        if ASR_T not in ('fuel', 'cell'):
+            raise ValueError(f"{name}: ASR_T must be 'fuel' or 'cell', not {ASR_T!r}")
+        super().__init__(dict(name=name, V_model=V_model, n_nodes=n_nodes, ASR_T=ASR_T, **params))
         self.F0 = interfaces.Flange(name + '.F0', Medium=MediumF, T=T_in, P=P_in)
         self.F1 = interfaces.Flange(name + '.F1', Medium=MediumF, T=T or T_in, P=P_in)
         self.A0 = interfaces.Flange(name + '.A0', Medium=MediumA, T=T_in, P=P_in)
@@ -169,9 +172,15 @@ class _FuelStack(ModelBase):
 
     @property
     def ASR_mean(self) -> float:
-        '''ASR averaged over the charge passed [Ohm cm2]: T is linear in the charge (Gauss-Legendre average).'''
+        '''
+        ASR averaged over the charge passed [Ohm cm2] (Gauss-Legendre average). The temperature is linear in the charge:
+        ``ASR_T='fuel'`` follows the fuel stream (inlet to outlet), ``ASR_T='cell'`` the mean of the fuel and the air stream.
+        '''
         nodes, weights = np.polynomial.legendre.leggauss(4)
-        T = self.F0.T + 0.5*(nodes + 1)*(self.F1.T - self.F0.T)
+        lam = 0.5*(nodes + 1)
+        T = self.F0.T + lam*(self.F1.T - self.F0.T)
+        if self.ASR_T == 'cell':
+            T = 0.5*(T + self.A0.T + lam*(self.A1.T - self.A0.T))
         return float(0.5*np.dot(weights, [self.ASR(t) for t in T]))
 
     @property
@@ -285,15 +294,16 @@ class SOC(_FuelStack):
         T, Q:      energy specification (default T = 1073.15 K)
         V_model:   'mean', 'outlet', 'average' or 'streams'
         n_nodes:   quadrature points of the 'mean' voltage
+        ASR_T:     temperature of the ASR: 'fuel' (default, fuel stream inlet to outlet) or 'cell' (mean of fuel and air stream)
     Deprecated: Tsoc0/T_soc0 and P_soc (set F0.T, A0.T, F0.P), Tsoc1/T_soc1 (use T), extent (no effect).
 
     Ports: F0 -> F1 (fuel side), A0 -> A1 (air side); outlets at the outlet temperature and inlet pressure.
     '''
     def __init__(self, name: str, MediumF: media.Medium_Base, MediumA: media.Medium_Base, Tsoc0=None, Tsoc1=None, I:float=0.0, cellArea:float=100.,
                  Ncells:int|float=1, f_ASR:float=1., extent=None, Qloss:float=0.0, *, T:float|None=None,
-                 Q:float|None=None, V_model:str='mean', n_nodes:int=12, T_soc0=None, T_soc1=None, P_soc=None):
+                 Q:float|None=None, V_model:str='mean', n_nodes:int=12, ASR_T:str='fuel', T_soc0=None, T_soc1=None, P_soc=None):
         T, T_in, P_in = _stack_legacy_inputs('SOC', 1073.15, T, Q, Tsoc0, T_soc0, Tsoc1, T_soc1, P_soc, extent)
-        super().__init__(name, MediumF, MediumA, T_in, P_in, T, Q, V_model, n_nodes,
+        super().__init__(name, MediumF, MediumA, T_in, P_in, T, Q, V_model, n_nodes, ASR_T=ASR_T,
                          I=I, cellArea=cellArea, Ncells=Ncells, f_ASR=f_ASR, Qloss=Qloss)
 
     @property

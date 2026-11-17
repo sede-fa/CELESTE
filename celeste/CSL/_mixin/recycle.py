@@ -26,11 +26,13 @@ class RecycleMixin:
         The tear variables are the component molar flows and the temperature of
         ``F_sink`` (the flange that receives the recycle); the pressure is taken
         from ``F_source``. One pass sets ``F_sink``, calls ``flow_method`` and
-        reads the result from ``F_source``.
+        reads the result from ``F_source``. Several tear streams are converged
+        together when ``F_source`` and ``F_sink`` are lists of flanges.
 
         Parameters:
-            F_source:    flange at the end of the loop (e.g. splitter outlet)
-            F_sink:      flange at the start of the loop (e.g. mixer inlet); its current state is the first guess
+            F_source:    flange at the end of the loop (e.g. splitter outlet), or a list of them
+            F_sink:      flange at the start of the loop (e.g. mixer inlet), or a list of them; their current
+                         state is the first guess
             flow_method: name of the method (or a callable) that evaluates the loop once
             eps:         convergence tolerance on the largest relative change of a tear variable
             max_iter:    largest number of passes
@@ -50,28 +52,39 @@ class RecycleMixin:
         if method not in self._TEAR_METHODS:
             raise ValueError(f"method must be one of {self._TEAR_METHODS}")
         run = getattr(self, flow_method) if isinstance(flow_method, str) else flow_method
-        self._record_link(F_source, F_sink)
+        sources = list(F_source) if isinstance(F_source, (list, tuple)) else [F_source]
+        sinks = list(F_sink) if isinstance(F_sink, (list, tuple)) else [F_sink]
+        if len(sources) != len(sinks):
+            raise ValueError("F_source and F_sink must hold the same number of flanges")
+        for a, b in zip(sources, sinks):
+            self._record_link(a, b)
+        sizes = np.cumsum([0] + [f.Medium.nX + 1 for f in sinks])
 
-        def pack(f):
+        def pack_one(f):
             return np.concatenate((f.n*np.asarray(f.Xi, dtype=float), [f.T]))
 
-        def unpack(x):
-            flows = np.maximum(x[:-1], 0.0)
-            total = flows.sum()
-            F_sink.P = F_source.P
-            F_sink.T = float(x[-1])
-            F_sink.n = float(total)
-            F_sink.Xi = flows/total if total > 0 else np.asarray(F_source.Xi, dtype=float)
+        def pack(flanges):
+            return np.concatenate([pack_one(f) for f in flanges])
 
-        x = pack(F_sink)
+        def unpack(x):
+            for i, (src, snk) in enumerate(zip(sources, sinks)):
+                xi = x[sizes[i]:sizes[i + 1]]
+                flows = np.maximum(xi[:-1], 0.0)
+                total = flows.sum()
+                snk.P = src.P
+                snk.T = float(xi[-1])
+                snk.n = float(total)
+                snk.Xi = flows/total if total > 0 else np.asarray(src.Xi, dtype=float)
+
+        x = pack(sinks)
         xs, gs = [], []
         error, count = np.inf, 0
         extrapolated = True                     # aitken: the next pass is a plain one
         while count < max_iter:
             unpack(x)
-            x = pack(F_sink)                    # what was actually applied (negative flows are clipped)
+            x = pack(sinks)                     # what was actually applied (negative flows are clipped)
             run()
-            g = pack(F_source)
+            g = pack(sources)
             count += 1
             scale = np.maximum(np.abs(g), 1e-9*max(np.abs(g[:-1]).sum(), 1e-300))
             error = float(np.max(np.abs(g - x)/scale))

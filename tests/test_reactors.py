@@ -281,6 +281,21 @@ def test_soc_voltage_models():
     assert streams.Vid == pytest.approx(soc.V_streams)
 
 
+def test_soc_asr_temperature_follows_fuel_or_mean_of_fuel_and_air():
+    def stack(ASR_T, T_air):
+        soc = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), I=20.0, Ncells=10, T=1073.15, ASR_T=ASR_T)
+        soc.F0.n, soc.F0.Xi, soc.F0.T = 0.05, np.array([0.5, 1e-9, 1e-9, 1e-9, 0.5, 1e-9]), 1073.15
+        soc.A0.n, soc.A0.T = 0.5, T_air
+        soc.run_sol()
+        return soc
+    # same temperature on both sides: no difference
+    assert stack('cell', 1073.15).ASR_mean == pytest.approx(stack('fuel', 1073.15).ASR_mean, rel=1e-12)
+    # a hotter air side lowers the ASR of the 'cell' temperature only
+    assert stack('cell', 1173.15).ASR_mean < stack('fuel', 1173.15).ASR_mean
+    with pytest.raises(ValueError):
+        electrochem.SOC('s', media.Fuel_CH4(), media.Air(), ASR_T='air')
+
+
 def test_soc_adiabatic_and_heat_duty():
     iso = _co_electrolysis(T=1100.0)
     iso.run_sol()
