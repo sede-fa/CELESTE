@@ -12,6 +12,7 @@ from ._mixin.analysis import ReportingMixin
 from ._mixin.recycle import RecycleMixin
 from ._mixin.flowsheet import FlowsheetMixin
 from ._mixin.specs import SpecMixin
+from ._mixin.eo import EquationOrientedMixin
 from ._mixin.pfd import PFDMixin
 
 from typing import Any
@@ -205,7 +206,7 @@ class ModelBase(Base):
         return m_in - m_out
 
 
-class SysBase(FlowsheetMixin, SpecMixin, PFDMixin, GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, ModelBase):
+class SysBase(FlowsheetMixin, EquationOrientedMixin, SpecMixin, PFDMixin, GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, ModelBase):
     _is_system=True
     pfd_kind = 'system'
     def __init__(self, args): # name,

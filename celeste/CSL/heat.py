@@ -133,6 +133,8 @@ class HexBase(ModelBase):
     def Sgen(self) -> float:
         return self.H0.n*(self.H1.s - self.H0.s) + self.C0.n*(self.C1.s - self.C0.s)
     
+    n_unknowns = 2          # the outlet temperatures, H1.T and C1.T
+
     def f_sol(self, x:npArray[np.float64]) -> npArray[np.float64]:
         self.H1.T = x[0]
         self.C1.T = x[1]

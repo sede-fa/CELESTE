@@ -73,15 +73,31 @@ class SpecMixin:
                          'input': float(self.rgetattr(s.vary)), 'lower': s.bounds[0], 'upper': s.bounds[1]})
         return pd.DataFrame(rows, columns=['spec', 'value', 'current', 'vary', 'input', 'lower', 'upper'])
 
-    def solve_specs(self, run=None, tol: float = 1e-8, **solve_kw):
+    def _eo_runner(self):
+        """Solve of the system for one set of inputs by ``eo_sol``, warm-started from the previous solution."""
+        state = {'warm': False}
+
+        def run():
+            res = self.eo_sol(init='current' if state['warm'] else 'sweep')
+            if state['warm'] and not res.success:
+                res = self.eo_sol(init='sweep')
+            state['warm'] = bool(res.success)
+            return res
+        return run
+
+    def solve_specs(self, run=None, tol: float = 1e-8, eo: bool = False, **solve_kw):
         """
         Solve the system with all design specifications: the inputs ``vary`` are adjusted until every target
-        has its value. ``run`` is the solve of the system for given inputs (default: ``run_sol``).
+        has its value. ``run`` is the solve of the system for given inputs (default: ``run_sol``). With ``eo=True``
+        every evaluation is the equation-oriented solve of the declared streams (``eo_sol``): the first one starts
+        from a sequential sweep, the next ones from the previous solution (a sweep again if that fails).
         Returns the solver result (``x`` = the adjusted inputs, ``success``).
         """
         specs = self.__dict__.get('_specs', [])
         if not specs:
             raise ValueError(f"{self.name}: no design specifications (add_spec)")
+        if eo:
+            run = self._eo_runner()
         run = run or self.run_sol
 
         def residuals(x):

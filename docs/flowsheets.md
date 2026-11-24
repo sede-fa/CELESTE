@@ -81,3 +81,21 @@ plant.pfd(views={'soc': lambda u: UnitView('electrochem').add('V', u.Vop, 'V'),
 `celeste.pfd.draw(name, units, streams)` draws any flowsheet from `{label: unit}` and
 `[(source, destination, stream, title)]` (sources and destinations are labels or `Terminal`s), so other models can
 use the same diagrams by giving their objects a `pfd_view`.
+
+## Equation-oriented solve
+
+The declared streams can also be solved all at once, on top of the sequential-modular solve (which stays as it is):
+
+```python
+eo = plant.eo_compile()      # 1. compile: unknowns and equations from the links and the units
+print(eo)                    #    EOSystem(socsys: 48 unknowns, 48 equations; ...)
+eo.initialise()              # 2. starting vector from one sequential sweep ('current' starts from the flanges)
+res = eo.solve()             # 3. solve every equation together; the solution is in the flanges
+plant.eo_sol()               # the three steps in one call
+plant.solve_specs(eo=True)   # every design-spec iteration is an eo_sol, warm-started from the previous one
+```
+
+Unknowns are the state (n, T, P, Xi) of every stream between two units and the unknowns of every unit that solves a
+system of equations (`f_sol`, for example the SOC extents). Equations are "stream = outlet of the unit it leaves" and the
+`f_sol` residuals of those units (`print_equations()` lists them). A unit without `f_sol` is an explicit function of its
+inlet. The sweep matters: from a bad start the equations can converge to a wrong root, or not at all.

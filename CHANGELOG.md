@@ -18,6 +18,7 @@ version may notice.
   `fuel_out`, `air_out`). Generated: solve order and tears (`sequential()`), `pack`/`unpack`, `residuals`,
   `solve()` (EO), `print_equations()`, `pfd()`. `examples/05_soec_flowsheet.py` uses it (same results)
 - **`equations()` / `print_equations()`**: what each unit of a system solves - units with a system of equations (equation count, unknowns, residual at the current state, description of the active `Eqs`) and algorithmic units
+- **Equation-oriented solve** on top of the declared streams (the sequential-modular solve is unchanged): `eo_compile()` builds the unknowns (stream states, unit unknowns such as the SOC extents) and equations (stream = outlet of its unit, unit `f_sol` residuals), `initialise()` starts from a sequential sweep or the current state, `solve()` solves all equations together; `eo_sol()` does the three steps and `solve_specs(eo=True)` uses it in every design-spec iteration, warm-started; `HexNTU.n_unknowns = 2`; docs/flowsheets.md
 - **Design specifications**: `SysBase.add_spec(target, value, vary=..., bounds=...)`, `specs`, `clear_specs()`,
   `solve_specs()` - targets and inputs as dotted paths (or a function of the system); docs/flowsheets.md
 - **SOC ASR temperature**: `SOC(..., ASR_T=)`: `'mean'` (default, the previous behaviour: averaged over the charge along
