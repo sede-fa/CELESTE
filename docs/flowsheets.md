@@ -49,3 +49,21 @@ the same choice as `solve_order`), units are placed by their longest path from t
 column is improved by barycentre sweeps, and the streams are routed orthogonally - recycles along lanes below
 the units. Colours mark the unit type (heat exchange, reactor, electrochemical, separation, pressure change,
 mixer/splitter, subsystem). `create_graph('mermaid')` and `create_graph('networkx')` remain available.
+
+## Equation-oriented solve
+
+The declared streams can also be solved all at once, on top of the sequential-modular solve (which stays as it is):
+
+```python
+eo = plant.eo_compile()      # 1. compile: unknowns and equations from the links and the units
+print(eo)                    #    EOSystem(socsys: 48 unknowns, 48 equations; ...)
+eo.initialise()              # 2. starting vector from one sequential sweep ('current' starts from the flanges)
+res = eo.solve()             # 3. solve every equation together; the solution is in the flanges
+plant.eo_sol()               # the three steps in one call
+plant.solve_specs(eo=True)   # every design-spec iteration is an eo_sol, warm-started from the previous one
+```
+
+Unknowns are the state (n, T, P, Xi) of every stream between two units and the unknowns of every unit that solves a
+system of equations (`f_sol`, for example the SOC extents). Equations are "stream = outlet of the unit it leaves" and the
+`f_sol` residuals of those units (`print_equations()` lists them). A unit without `f_sol` is an explicit function of its
+inlet. The sweep matters: from a bad start the equations can converge to a wrong root, or not at all.

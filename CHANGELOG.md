@@ -11,6 +11,9 @@ version may notice.
 - **`SysBase.pfd()`**: interactive process flow diagram (layered layout, orthogonal streams, recycles dashed;
   stream state and composition and unit duties on hover) as one self-contained HTML file
 - **`equations()` / `print_equations()`**: what each unit of a system solves - units with a system of equations (equation count, unknowns, residual at the current state, description of the active `Eqs`) and algorithmic units. The `Eqs` of the heat exchangers, mixer, splitter, valve, pump, compressors and the black-box units now carry a one-line description of their equations.
+
+- **`equations()` / `print_equations()`**: what each unit of a system solves - units with a system of equations (equation count, unknowns, residual at the current state, description of the active `Eqs`) and algorithmic units
+- **Equation-oriented solve** on top of the declared streams (the sequential-modular solve is unchanged): `eo_compile()` builds the unknowns (stream states, unit unknowns such as the SOC extents) and equations (stream = outlet of its unit, unit `f_sol` residuals), `initialise()` starts from a sequential sweep or the current state, `solve()` solves all equations together; `eo_sol()` does the three steps and `solve_specs(eo=True)` uses it in every design-spec iteration, warm-started; `HexNTU.n_unknowns = 2`; docs/flowsheets.md
 - **Design specifications**: `SysBase.add_spec(target, value, vary=..., bounds=...)`, `specs`, `clear_specs()`,
   `solve_specs()` - targets and inputs as dotted paths (or a function of the system); docs/flowsheets.md
 - **SOC ASR temperature**: `SOC(..., ASR_T=)`: `'mean'` (default, the previous behaviour: averaged over the charge along

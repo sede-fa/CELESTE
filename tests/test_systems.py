@@ -405,3 +405,53 @@ def test_equations_listing():
     assert df.loc['HT_F0', 'solved_as'] == 'algorithmic'
     text = s.print_equations()
     assert 'soc (SOC): 2 equations in 2 unknowns' in text and 'HT_F0 (Heater)' in text
+
+
+# ---- equation-oriented solve on top of the declared streams --------------------------------------------
+
+def test_eo_solve_matches_the_sequential_solve_on_recycles():
+    sys_ = _TwoRecycles('t')
+    eo = sys_.eo_compile()
+    assert eo.n_unknowns == eo.n_equations and len(eo.streams) == 8
+    res = sys_.eo_sol(sweep_kw=dict(eps=1e-2))                # a loose sweep is enough to start from
+    assert res.success and res.residual_norm < 1e-9
+    assert sys_.heater.F0.n == pytest.approx(1.0/(0.6*0.7), rel=1e-8)
+    assert sys_.out.F0.n == pytest.approx(1.0, rel=1e-8)
+    assert 'unknown' in eo.variables.columns and eo.variables['value'].notna().all()
+
+
+def test_eo_solve_of_the_soc_system_converges_from_a_perturbed_start():
+    from celeste.CSL.systems.SOCsystem import SOCsysRecupe
+    s = SOCsysRecupe('socsys', I=10., Ncells=1000, na0=0.5)
+    s.run_sol()
+    ref = (s.soc.F1.T, s.soc.F1.n, s.HEX_A.C1.T)
+    s.links_from_run()
+    eo = s.eo_compile()
+    assert 'unknowns' in repr(eo) and len(eo.solved) == 3     # SOC extents and the two heat exchangers
+    eo.initialise()
+    eo.x = eo.x*(1 + 0.05*np.random.default_rng(1).standard_normal(eo.x.size))
+    res = eo.solve()
+    assert res.success
+    assert s.soc.F1.T == pytest.approx(ref[0], abs=1e-6) and s.soc.F1.n == pytest.approx(ref[1], rel=1e-8)
+    assert s.HEX_A.C1.T == pytest.approx(ref[2], abs=1e-6)
+
+
+def test_design_specs_with_the_equation_oriented_solve():
+    from celeste.CSL import reactors
+
+    class Reforming(SysBase):
+        def __init__(self, name):
+            super().__init__(locals())
+            gas = media.Fuel_CH4()
+            self.source1 = flow.SourceM('source1', gas, 1, np.array([0.01, 0.3, 0.2, 1e-5, 0.5, 1e-5]), 973.15, 5.)
+            self.reformer = reactors.MR('reformer', gas, T=973.15)
+            self.sink1 = flow.Sink('sink1', gas)
+            self.link(self.source1.F1, self.reformer.F0)
+            self.link(self.reformer.F1, self.sink1.F0)
+
+    r = Reforming('r')
+    r.add_spec('sink1.F0.n', 2.0, vary='source1.F1.n', bounds=(0.1, 10.0))
+    assert r.solve_specs(eo=True).success and r.sink1.F0.n == pytest.approx(2.0, rel=1e-7)
+    r.add_spec(lambda s: s.sink1.F0.Xi[0], 0.45, vary='reformer.T', bounds=(800.0, 1200.0), name='H2 fraction')
+    assert r.solve_specs(eo=True).success
+    assert r.sink1.F0.n == pytest.approx(2.0, rel=1e-6) and r.sink1.F0.Xi[0] == pytest.approx(0.45, rel=1e-6)
