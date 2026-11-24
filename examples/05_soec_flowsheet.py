@@ -7,6 +7,9 @@ An SOEC system built from Equinox units, solved two ways:
   method with the exact Jacobian (``jax.jacfwd``) solves them all at once, starting from the SM solution.
   EO then also solves design specifications directly (here: the current for a given hydrogen production).
 
+The plant is a ``jx.Flowsheet``: its streams are declared once with ``link`` (as in CSL); the solve order, the
+tear streams, the unknowns and the equations are generated from them (``plant.print_equations()``).
+
 Flowsheet (fuel side; the air enters the stack at the stack temperature):
 
     steam --> MIX --> REC(cold) --> HT --> SOC --> REC(hot) --> KO --> SPL --> hydrogen product
@@ -25,18 +28,19 @@ import jax.numpy as jnp
 import numpy as np
 
 from celeste.jx import ideal, units
-from celeste.jx.units import Stream, flows, stream_from_vector, stream_vector
+from celeste.jx.flowsheet import Flowsheet
+from celeste.jx.units import Stream, flows
 
 FUEL = ideal.ideal_gas(['H2', 'CH4', 'CO2', 'CO', 'H2O', 'N2'])
 AIR = ideal.ideal_gas(['O2', 'N2'])
+SPECIES = {6: ['H2', 'CH4', 'CO2', 'CO', 'H2O', 'N2'], 2: ['O2', 'N2']}      # names for the PFD
 TRACE = 1e-9                                                       # mole fraction of absent species
 
-STEAM = Stream(0.1, 423.15, 1.0, jnp.array([TRACE, TRACE, TRACE, TRACE, 1.0 - 5*TRACE, TRACE]))
-AIR_IN = Stream(0.3, 1073.15, 1.0, jnp.array([0.21, 0.79]))
 
-
-class SOECPlant(eqx.Module):
-    """The units of the flowsheet with their design inputs (an Equinox module: jit, vmap and grad apply)."""
+class SOECPlant(Flowsheet):
+    """The feeds, the units with their design inputs and the streams (an Equinox module: jit, vmap and grad apply)."""
+    steam: Stream
+    air: Stream
     mix: units.Mixer
     rec: units.HeatExchanger
     ht: units.Heater
@@ -45,6 +49,8 @@ class SOECPlant(eqx.Module):
     spl: units.Splitter
 
     def __init__(self, I=-50.0, Ncells=300.0, T_soc=1073.15, eff_rec=0.8, recycle=0.15):
+        self.steam = Stream(0.1, 423.15, 1.0, jnp.array([TRACE, TRACE, TRACE, TRACE, 1.0 - 5*TRACE, TRACE]))
+        self.air = Stream(0.3, 1073.15, 1.0, jnp.array([0.21, 0.79]))
         self.mix = units.Mixer(FUEL)
         self.rec = units.HeatExchanger(FUEL, FUEL, eff_rec)
         self.ht = units.Heater(FUEL, T_soc)
@@ -52,111 +58,61 @@ class SOECPlant(eqx.Module):
         self.ko = units.Separator(FUEL, jnp.array([1.0, 1.0, 1.0, 1.0, 0.07, 1.0]), 313.15)  # 7 % of the water stays
         self.spl = units.Splitter(recycle)
 
-    # ---- sequential modular -------------------------------------------------------------------------
-    def pass_(self, recycle: Stream, hot_guess: Stream):
-        """One pass through the flowsheet for a guessed recycle (and recuperator hot side); returns all streams."""
-        s = {'recycle_in': recycle}
-        s['mix'] = self.mix(STEAM, recycle)
-        _, s['rec_cold'], _ = self.rec(hot_guess, s['mix'])
-        s['ht'], _ = self.ht(s['rec_cold'])
-        s['soc_fuel'], s['soc_air'], _, _ = self.soc(s['ht'], AIR_IN)
-        s['rec_hot'], _, _ = self.rec(s['soc_fuel'], s['mix'])
-        s['ko_gas'], s['water'], _ = self.ko(s['rec_hot'])
-        s['recycle'], s['product'] = self.spl(s['ko_gas'])
-        return s
-
-    def solve_sm(self, tol=1e-10, max_iter=100):
-        """Converge the tear streams (recycle and recuperator hot inlet) by successive substitution."""
-        def tear(s):
-            return jnp.concatenate((stream_vector(s['recycle']), stream_vector(s['soc_fuel'])))
-
-        def run(x):
-            return self.pass_(stream_from_vector(x[:7], STEAM.P), stream_from_vector(x[7:], STEAM.P))
-
-        def cond(c):
-            return (c[1] > tol) & (c[2] < max_iter)
-
-        def body(c):
-            x, _, k = c
-            x_new = tear(run(x))
-            return x_new, jnp.max(jnp.abs(x_new - x)/(jnp.abs(x) + 1e-3)), k + 1
-
-        x0 = jnp.concatenate((stream_vector(STEAM.replace(n=0.1*STEAM.n, T=313.15)), stream_vector(STEAM.replace(T=1073.15))))
-        x, err, k = jax.lax.while_loop(cond, body, (x0, jnp.inf, 0))
-        return run(x), k
-
-    # ---- equation oriented --------------------------------------------------------------------------
-    UNKNOWN = ('mix', 'rec_cold', 'ht', 'soc_fuel', 'soc_air', 'rec_hot', 'ko_gas', 'water', 'recycle', 'product')
-
-    @staticmethod
-    def pack(s):
-        return jnp.concatenate([stream_vector(s[k]) for k in SOECPlant.UNKNOWN])
-
-    @staticmethod
-    def unpack(x):
-        s, i = {}, 0
-        for k in SOECPlant.UNKNOWN:
-            m = 3 if k == 'soc_air' else 7
-            s[k] = stream_from_vector(x[i:i + m], STEAM.P)
-            i += m
-        return s
-
-    def residuals(self, x):
-        """Equations of all units; the unknowns are the stream variables."""
-        s = self.unpack(x)
-        return jnp.concatenate((
-            self.mix.residuals(STEAM, s['recycle'], s['mix']),
-            self.rec.residuals(s['soc_fuel'], s['mix'], s['rec_hot'], s['rec_cold']),
-            self.ht.residuals(s['rec_cold'], s['ht']),
-            self.soc.residuals(s['ht'], AIR_IN, s['soc_fuel'], s['soc_air']),
-            self.ko.residuals(s['rec_hot'], s['ko_gas'], s['water']),
-            self.spl.residuals(s['ko_gas'], s['recycle'], s['product']),
-        ))
-
-    def solve_eo(self, x0):
-        return self.unpack(units.newton(self.residuals, x0))
+        self.link(self.steam, self.mix.a)
+        self.link(self.mix.out, self.rec.cold)
+        self.link(self.rec.cold_out, self.ht.feed)
+        self.link(self.ht.out, self.soc.fuel_in)
+        self.link(self.air, self.soc.air_in)
+        self.link(self.soc.fuel_out, self.rec.hot)
+        self.link(self.rec.hot_out, self.ko.feed)
+        self.link(self.ko.out1, self.spl.feed)
+        self.link(self.spl.out1, self.mix.b)          # hydrogen recycle; spl.out2 (product), ko.out2 (water) leave
 
 
-def solve_eo_with_spec(x0, H2_product, I0=-50.0, **design):
+def solve_with_spec(plant, start, H2_product):
     """EO with a design specification: the current that gives ``H2_product`` mol/s of hydrogen."""
     def residuals(z):
-        plant = SOECPlant(I=z[-1], **design)
-        s = plant.unpack(z[:-1])
-        return jnp.append(plant.residuals(z[:-1]), (flows(s['product'])[0] - H2_product)/H2_product)
-    z = units.newton(residuals, jnp.append(x0, I0))
-    return SOECPlant.unpack(z[:-1]), z[-1]
+        p = eqx.tree_at(lambda p: p.soc.I, plant, z[-1])
+        s = p.unpack(z[:-1], start)
+        return jnp.append(p.residuals(z[:-1], start), (flows(s['spl.out2'])[0] - H2_product)/H2_product)
+    z = units.newton(residuals, jnp.append(plant.pack(start), plant.soc.I))
+    return plant.unpack(z[:-1], start), z[-1]
 
 
 def summary(plant, s):
     """Duties and power of a solved flowsheet, kJ/s."""
-    W = plant.soc.work(s['ht'], AIR_IN, s['soc_fuel'])
-    return dict(W_stack=W, Q_heater=s['ht'].H(FUEL) - s['rec_cold'].H(FUEL),
-                Q_stack=plant.soc.heat(s['ht'], AIR_IN, s['soc_fuel'], s['soc_air'], W),
-                H2=flows(s['product'])[0])
+    W = plant.soc.work(s['ht.out'], plant.air, s['soc.fuel_out'])
+    return dict(W_stack=W, Q_heater=s['ht.out'].H(FUEL) - s['rec.cold_out'].H(FUEL),
+                Q_stack=plant.soc.heat(s['ht.out'], plant.air, s['soc.fuel_out'], s['soc.air_out'], W),
+                H2=flows(s['spl.out2'])[0])
 
 
 if __name__ == '__main__':
     plant = SOECPlant()
+    plant.print_equations()
 
-    sm = eqx.filter_jit(lambda p: p.solve_sm())
-    t = time.perf_counter(); (s, passes) = sm(plant); jax.block_until_ready(s); t_c = time.perf_counter() - t
-    t = time.perf_counter(); (s, passes) = sm(plant); jax.block_until_ready(s); t_r = time.perf_counter() - t
-    print(f'SM : {int(passes)} passes, compile + run {t_c:.1f} s, run {t_r*1e3:.1f} ms')
+    sm = eqx.filter_jit(lambda p: p.sequential())
+    t = time.perf_counter(); s = sm(plant); jax.block_until_ready(s); t_c = time.perf_counter() - t
+    t = time.perf_counter(); s = sm(plant); jax.block_until_ready(s); t_r = time.perf_counter() - t
+    print(f'SM : compile + run {t_c:.1f} s, run {t_r*1e3:.1f} ms')
     print('     ' + ', '.join(f'{k} = {float(v):.5f}' for k, v in summary(plant, s).items()))
 
-    x0 = SOECPlant.pack(s)
-    eo = eqx.filter_jit(lambda p, x: p.solve_eo(x))
-    t = time.perf_counter(); s_eo = eo(plant, x0); jax.block_until_ready(s_eo); t_c = time.perf_counter() - t
-    print(f'EO : {x0.size} unknowns from the SM solution, max |residual| = '
-          f'{float(jnp.max(jnp.abs(plant.residuals(SOECPlant.pack(s_eo))))):.1e}, compile + run {t_c:.1f} s')
+    eo = eqx.filter_jit(lambda p, s: p.solve(s))
+    t = time.perf_counter(); s_eo = eo(plant, s); jax.block_until_ready(s_eo); t_c = time.perf_counter() - t
+    x = plant.pack(s_eo)
+    print(f'EO : {x.size} unknowns from the SM solution, max |residual| = '
+          f'{float(jnp.max(jnp.abs(plant.residuals(x, s)))):.1e}, compile + run {t_c:.1f} s')
 
     # a different operating point solved by EO from the SM solution of the base case
-    s_spec, I = eqx.filter_jit(lambda x: solve_eo_with_spec(x, 0.09))(x0)
+    s_spec, I = eqx.filter_jit(lambda p, s: solve_with_spec(p, s, 0.09))(plant, s)
     print(f'EO with a design spec: H2 product 0.09 mol/s needs I = {float(I):.3f} A per cell')
 
     # many operating points at once: the SM solve vectorised over the current
     currents = jnp.linspace(-30.0, -60.0, 7)
-    sweep = eqx.filter_jit(jax.vmap(lambda i: summary(SOECPlant(I=i), SOECPlant(I=i).solve_sm()[0])))(currents)
+    sweep = eqx.filter_jit(jax.vmap(lambda i: summary(SOECPlant(I=i), SOECPlant(I=i).sequential())))(currents)
     print('current sweep (A per cell) :', np.round(np.asarray(currents), 1))
     print('  H2 product [mol/s]       :', np.round(np.asarray(sweep['H2']), 4))
     print('  stack power [kW]         :', np.round(np.asarray(sweep['W_stack']), 3))
+
+    plant.pfd(s_eo, species=SPECIES, path='soec_flowsheet.html')
+    print('process flow diagram: soec_flowsheet.html')

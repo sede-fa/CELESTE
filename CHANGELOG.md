@@ -13,6 +13,10 @@ version may notice.
   framework-independent package `celeste.pfd` (`draw`, `UnitView`, `StreamView`, `Terminal`); units and flanges say
   what they show with `pfd_view()` (unit families add their own rows; `pfd_kind` sets the colour), and
   `pfd(views={name or class: function})` replaces it for one drawing. Tear selection moved to `celeste.tearing`
+- **`celeste.jx.flowsheet.Flowsheet`**: jx plants declared with `link(outlet, inlet)` like CSL systems; the jx units
+  name their ports (`inlets`/`outlets`, e.g. `mix.out`, `rec.cold`; the SOC ports are `fuel_in`, `air_in`,
+  `fuel_out`, `air_out`). Generated: solve order and tears (`sequential()`), `pack`/`unpack`, `residuals`,
+  `solve()` (EO), `print_equations()`, `pfd()`. `examples/05_soec_flowsheet.py` uses it (same results)
 - **`equations()` / `print_equations()`**: what each unit of a system solves - units with a system of equations (equation count, unknowns, residual at the current state, description of the active `Eqs`) and algorithmic units
 - **Design specifications**: `SysBase.add_spec(target, value, vary=..., bounds=...)`, `specs`, `clear_specs()`,
   `solve_specs()` - targets and inputs as dotted paths (or a function of the system); docs/flowsheets.md

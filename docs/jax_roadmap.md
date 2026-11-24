@@ -73,6 +73,29 @@ Every unit has two faces:
   as unknowns - for equation-oriented flowsheets. No unit solve is nested in
   them (except the voltage of an adiabatic SOC).
 
+Every unit names its streams (`inlets`, `outlets`, in the order of `residuals`), so a
+**`celeste.jx.flowsheet.Flowsheet`** declares a plant like a CSL system, with `link`:
+
+```python
+class Plant(Flowsheet):
+    def __init__(self):
+        self.steam = Stream(...)                    # feeds are streams of the plant
+        self.mix = units.Mixer(FUEL)
+        ...
+        self.link(self.steam, self.mix.a)
+        self.link(self.mix.out, self.rec.cold)
+        self.link(self.spl.out1, self.mix.b)        # recycle; an outlet that is not linked is a product
+
+s = plant.sequential()        # solve order and tear streams generated (same tearing as CSL); streams by name
+s = plant.solve(s)            # equation oriented: unit residuals in declaration order, Newton from s
+plant.print_equations()       # every unit with its in- and outgoing streams and its equations
+plant.pfd(s)                  # process flow diagram (celeste.pfd), stream states on the lines
+```
+
+Streams are named after the outlet they leave (`'mix.out'`) or the feed (`'steam'`). `pack`, `unpack` and
+`residuals(x, start)` are generated from the links; a design specification adds an unknown with `eqx.tree_at`
+and an equation (see `solve_with_spec` in the example).
+
 `examples/05_soec_flowsheet.py` builds an SOEC system (steam feed, hydrogen
 recycle, recuperator, heater, stack, water knock-out) both ways:
 
@@ -130,8 +153,8 @@ both and lets each do what it is good at:
    gives a converged, physically sensible state for every flange. Newton's
    method converges fast from there and slowly or not at all from a poor guess.
 2. **Assemble the residuals.** Every unit already separates its explicit
-   relations from its residuals (`Eqs`, `f_sol`), and `SysBase.connect`
-   writes the connection equations. Collecting them over the flowsheet gives
+   relations from its residuals (`Eqs`, `f_sol`), and the declared streams
+   (`link`) give the connection equations. Collecting them over the flowsheet gives
    F(x); the recorded connections (`boundary_flanges`) say which flange values
    are unknowns and which are fixed by the feeds.
 3. **Solve and optimise in EO.** Design specifications (a product purity, an

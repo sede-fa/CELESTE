@@ -158,13 +158,34 @@ def _soec_example():
 def test_soec_flowsheet_sequential_and_equation_oriented_agree():
     ex = _soec_example()
     plant = ex.SOECPlant()
-    s, passes = eqx.filter_jit(lambda p: p.solve_sm())(plant)
-    assert int(passes) < 100
-    H2 = float(units.flows(s['product'])[0])
+    assert plant._plan()[1] == ['soc.fuel_out', 'spl.out1']                     # tears generated from the links
+    assert plant.products == ['soc.air_out', 'ko.out2', 'spl.out2']
+    s = eqx.filter_jit(lambda p: p.sequential())(plant)
+    H2 = float(units.flows(s['spl.out2'])[0])
     assert H2 == pytest.approx(-float(plant.soc.n_O), rel=1e-8)          # all hydrogen made leaves as product
-    x0 = ex.SOECPlant.pack(s)
-    assert np.max(np.abs(np.asarray(plant.residuals(x0)))) < 1e-8          # SM solution satisfies the EO equations
-    s_eo = eqx.filter_jit(lambda p, x: p.solve_eo(x))(plant, x0)
-    assert np.max(np.abs(np.asarray(plant.residuals(ex.SOECPlant.pack(s_eo))))) < 1e-12
-    _, I = eqx.filter_jit(lambda x: ex.solve_eo_with_spec(x, 0.09))(x0)
+    x0 = plant.pack(s)
+    assert np.max(np.abs(np.asarray(plant.residuals(x0, s)))) < 1e-8      # SM solution satisfies the EO equations
+    s_eo = eqx.filter_jit(lambda p, s: p.solve(s))(plant, s)
+    assert np.max(np.abs(np.asarray(plant.residuals(plant.pack(s_eo), s)))) < 1e-12
+    _, I = eqx.filter_jit(lambda p, s: ex.solve_with_spec(p, s, 0.09))(plant, s)
     assert float(I) == pytest.approx(-0.09*2*96485.0/300.0, rel=1e-8)
+    assert 'soc (SOC): ht.out, air -> soc.fuel_out, soc.air_out' in plant.print_equations()
+
+
+def test_jx_flowsheet_pfd_and_link_checks():
+    from celeste.jx.flowsheet import Flowsheet
+    ex = _soec_example()
+    plant = ex.SOECPlant()
+    s = plant.sequential()
+    page = plant.pfd(s, species=ex.SPECIES).html
+    assert '6 units, 12 streams; 2 back stream' in page and 'spl.out1 \\u2192 mix.b' in page and 'H2O' in page
+    assert 'electrochemical' in page                                      # kind of the jx SOC
+
+    class Broken(Flowsheet):
+        mix: units.Mixer
+
+        def __init__(self):
+            self.mix = units.Mixer(ex.FUEL)
+            self.link(self.mix.out, self.mix.out)
+    with pytest.raises(ValueError, match='not an inlet'):
+        Broken()

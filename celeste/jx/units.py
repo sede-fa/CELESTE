@@ -29,13 +29,14 @@ import equinox as eqx  # noqa: E402
 import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 from jax import lax  # noqa: E402
+from typing import NamedTuple  # noqa: E402
 
 from . import ideal  # noqa: E402
 from ..CSL import equilibrium as eq  # noqa: E402
 
 import numpy as np  # noqa: E402
 
-__all__ = ["Stream", "Heater", "Compressor", "Mixer", "Splitter", "Separator", "HeatExchanger",
+__all__ = ["Stream", "Unit", "Port", "Heater", "Compressor", "Mixer", "Splitter", "Separator", "HeatExchanger",
            "ShiftReformingEquilibrium", "SOC", "newton", "flows", "stream_vector", "stream_from_vector"]
 
 F_CONST = 96485.0      #: Faraday constant, C/mol (as in celeste.CSL.electrochem)
@@ -130,8 +131,48 @@ def newton(residual, x0, iterations: int = 40, tol: float = 1e-12):
     return xs - jnp.linalg.solve(J + 1e-14*jnp.eye(xs.shape[0]), residual(xs))
 
 
-class Heater(eqx.Module):
+class Port(NamedTuple):
+    """A named inlet or outlet of a unit, as in ``mix.out``: what ``Flowsheet.link`` connects."""
+    unit: "Unit"
+    name: str
+
+
+class Unit(eqx.Module):
+    """
+    Base of the units: named ports and what the process flow diagram shows.
+
+    ``inlets`` / ``outlets`` name the streams in the order of the arguments of ``residuals(*inlets, *outlets)``
+    and of the streams returned by calling the unit; ``unit.<port>`` is that port (``mix.out``, ``rec.cold``).
+    """
+    inlets = ()
+    outlets = ()
+    pfd_kind = 'other'
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        clash = set(cls.inlets + cls.outlets) & set(getattr(cls, '__annotations__', {}))
+        if clash:
+            raise TypeError(f"{cls.__name__}: port names {sorted(clash)} are also fields")
+
+    def __getattr__(self, name):
+        if name in type(self).inlets + type(self).outlets:
+            return Port(self, name)
+        raise AttributeError(f"{type(self).__name__} has no attribute or port {name!r}")
+
+    def pfd_view(self):
+        """The scalar parameters of the unit (the streams carry the state)."""
+        from ..pfd import UnitView
+        view = UnitView(self.pfd_kind)
+        for name in self.__dataclass_fields__:
+            value = getattr(self, name)
+            if isinstance(value, (int, float)) or (hasattr(value, 'shape') and value.shape == ()):
+                view.add(name, float(value))
+        return view
+
+
+class Heater(Unit):
     """Heat (or cool) a stream to ``T_out``. Returns ``(outlet, Q)`` with the duty Q in kJ/s."""
+    inlets, outlets, pfd_kind = ('feed',), ('out',), 'heat'
     gas: ideal.IdealGas
     T_out: jax.Array
 
@@ -140,11 +181,11 @@ class Heater(eqx.Module):
         return out, out.H(self.gas) - feed.H(self.gas)
 
     def residuals(self, feed: Stream, out: Stream):
-        """Equations of the unit for an equation-oriented model (zero at the solution)."""
+        """Species balances, outlet temperature = T_out."""
         return jnp.append((flows(out) - flows(feed))/feed.n, (out.T - self.T_out)/self.T_out)
 
 
-class Compressor(eqx.Module):
+class Compressor(Unit):
     """
     Adiabatic compressor / turbine with isentropic efficiency ``eff``.
     Returns ``(outlet, W)`` with the shaft work W in kJ/s (negative for an expansion).
@@ -152,6 +193,7 @@ class Compressor(eqx.Module):
     The isentropic outlet temperature follows from s(T_s, P_out) = s(T_in, P_in)
     with the real temperature dependence of cp (the CSL model uses a mean cp).
     """
+    inlets, outlets, pfd_kind = ('feed',), ('out',), 'pressure'
     gas: ideal.IdealGas
     P_out: jax.Array
     eff: jax.Array = 1.0
@@ -167,8 +209,9 @@ class Compressor(eqx.Module):
         return Stream(feed.n, T_out, self.P_out, feed.x), feed.n*dh
 
 
-class Mixer(eqx.Module):
+class Mixer(Unit):
     """Adiabatic mixing of two streams at the pressure of the first one. Returns the outlet stream."""
+    inlets, outlets, pfd_kind = ('a', 'b'), ('out',), 'flow'
     gas: ideal.IdealGas
 
     def __call__(self, a: Stream, b: Stream):
@@ -187,25 +230,28 @@ class Mixer(eqx.Module):
                           (out.H(self.gas) - a.H(self.gas) - b.H(self.gas))/(n*ideal.R*1e3))
 
 
-class Splitter(eqx.Module):
+class Splitter(Unit):
     """Splits a stream: the fraction ``split`` goes to the first outlet, the rest to the second."""
+    inlets, outlets, pfd_kind = ('feed',), ('out1', 'out2'), 'flow'
     split: jax.Array
 
     def __call__(self, feed: Stream):
         return feed.replace(n=self.split*feed.n), feed.replace(n=(1 - self.split)*feed.n)
 
     def residuals(self, feed: Stream, out1: Stream, out2: Stream):
+        """Species flows: out1 = split*feed, out2 = (1 - split)*feed; both outlets at the feed temperature."""
         return jnp.concatenate(((flows(out1) - self.split*flows(feed))/feed.n,
                                 (flows(out2) - (1 - self.split)*flows(feed))/feed.n,
                                 jnp.stack([out1.T - feed.T, out2.T - feed.T])/feed.T))
 
 
-class Separator(eqx.Module):
+class Separator(Unit):
     """
     Black-box separator (the counterpart of ``CSL.components.GPU_2SV2``): of every species the fraction
     ``recovery[i]`` goes to the first outlet, the rest to the second; both leave at ``T_out`` and the inlet
     pressure. Returns ``(out1, out2, Q)`` with the duty Q in kJ/s.
     """
+    inlets, outlets, pfd_kind = ('feed',), ('out1', 'out2'), 'separation'
     gas: ideal.IdealGas
     recovery: jax.Array
     T_out: jax.Array
@@ -217,17 +263,19 @@ class Separator(eqx.Module):
         return out1, out2, out1.H(self.gas) + out2.H(self.gas) - feed.H(self.gas)
 
     def residuals(self, feed: Stream, out1: Stream, out2: Stream):
+        """Species flows: out1 = recovery*feed, out2 = the rest; both outlets at T_out."""
         return jnp.concatenate(((flows(out1) - self.recovery*flows(feed))/feed.n,
                                 (flows(out2) - (1 - self.recovery)*flows(feed))/feed.n,
                                 (jnp.stack([out1.T, out2.T]) - self.T_out)/self.T_out))
 
 
-class HeatExchanger(eqx.Module):
+class HeatExchanger(Unit):
     """
     Counter-current heat exchanger (recuperator) with the effectiveness ``eff``: the duty is ``eff`` times the
     largest duty the two streams allow (each heated or cooled to the inlet temperature of the other), with the
     full temperature dependence of the heat capacities. Returns ``(hot_out, cold_out, Q)``, Q in kJ/s.
     """
+    inlets, outlets, pfd_kind = ('hot', 'cold'), ('hot_out', 'cold_out'), 'heat'
     gas_hot: ideal.IdealGas
     gas_cold: ideal.IdealGas
     eff: jax.Array
@@ -246,13 +294,14 @@ class HeatExchanger(eqx.Module):
         return outlet(hot, self.gas_hot, hot.H(self.gas_hot) - Q), outlet(cold, self.gas_cold, cold.H(self.gas_cold) + Q), Q
 
     def residuals(self, hot: Stream, cold: Stream, hot_out: Stream, cold_out: Stream):
+        """Species flows unchanged on each side; energy balances H_hot - H_hot_out = Q = H_cold_out - H_cold, Q = eff*Q_max."""
         Q, scale = self.duty(hot, cold), (hot.n + cold.n)*ideal.R*1e3
         return jnp.concatenate(((flows(hot_out) - flows(hot))/hot.n, (flows(cold_out) - flows(cold))/cold.n,
                                 jnp.stack([hot.H(self.gas_hot) - hot_out.H(self.gas_hot) - Q,
                                            cold_out.H(self.gas_cold) - cold.H(self.gas_cold) - Q])/scale))
 
 
-class ShiftReformingEquilibrium(eqx.Module):
+class ShiftReformingEquilibrium(Unit):
     """
     Isothermal reactor at water-gas-shift and methane-reforming equilibrium -
     the Equinox counterpart of ``celeste.CSL.reactors.MR``.
@@ -260,6 +309,7 @@ class ShiftReformingEquilibrium(eqx.Module):
     Species order of ``media.Fuel_CH4``: H2, CH4, CO2, CO, H2O, N2. The two
     reaction extents are the only unknowns. Returns ``(outlet, Q)``.
     """
+    inlets, outlets, pfd_kind = ('feed',), ('out',), 'reaction'
     gas: ideal.IdealGas
     T: jax.Array
     P: jax.Array
@@ -298,7 +348,7 @@ class ShiftReformingEquilibrium(eqx.Module):
         return out, out.H(self.gas) - Stream(feed.n, self.T, feed.P, feed.x).H(self.gas)
 
 
-class SOC(eqx.Module):
+class SOC(Unit):
     r"""
     Solid oxide cell stack - the Equinox counterpart of :class:`celeste.CSL.electrochem.SOC`, built on the
     same equations (:func:`celeste.CSL.equilibrium.fuel_residuals`).
@@ -312,6 +362,7 @@ class SOC(eqx.Module):
     Calling the unit solves it: ``fuel_out, air_out, W, Q = soc(fuel, air)`` with the electrical work W and the
     heat Q added, kJ/s. ``residuals`` gives its equations for an equation-oriented flowsheet.
     """
+    inlets, outlets, pfd_kind = ('fuel_in', 'air_in'), ('fuel_out', 'air_out'), 'electrochem'
     fuel: ideal.IdealGas
     air: ideal.IdealGas
     I: jax.Array
