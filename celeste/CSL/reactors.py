@@ -835,6 +835,7 @@ class Reformer(ModelBase):
         self.r_i = np.zeros(3, dtype=float) #mol/m3cat/s
         
     def Eqs(self): 
+        """Reaction rates r_i of shift, methane reforming and propane pre-reforming at the outlet state and the resulting species balances."""
         
         self.r_i[0] = self.A[0]*np.exp(-self.Ea[0]/8.314/self.F1.T)*(self.F1.Xi[3]*self.F1.Xi[4]*self.F1.P**2 - (1/self.K_WGS())*self.F1.Xi[2]*self.F1.Xi[0]*self.F1.P**2)
         self.r_i[1] = self.A[1]*np.exp(-self.Ea[1]/8.314/self.F1.T)*(self.F1.Xi[1]*self.F1.Xi[4]*self.F1.P**2 - (1/self.K_MSR())*self.F1.Xi[3]*self.F1.Xi[0]**3*self.F1.P**4)

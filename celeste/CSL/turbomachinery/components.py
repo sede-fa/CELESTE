@@ -249,6 +249,7 @@ class CompIsent(Compressor):
         comp.run_sol()                  # sets comp.F1.T; comp.W is the work in kJ/s
     """
     def Eqs(self):
+        """Outlet from the isentropic outlet state: h1 = h0 + (h1s - h0)/eff."""
         self._path(self.eff)
 
     @property
@@ -270,6 +271,7 @@ class CompPolytropic(CompIsent):
         self._n_steps = n_steps
 
     def Eqs(self):
+        """Outlet from the polytropic path of n_steps small isentropic steps with the polytropic efficiency."""
         F0, F1 = self.F0, self.F1
         if not isinstance(F0.Medium, media.Medium_NASAbase):
             return self._path(self.eff, self._n_steps)
@@ -287,6 +289,7 @@ class CompIsot(Compressor):
     R = 8.314462618e-3
 
     def Eqs(self):
+        """Isothermal ideal-gas compression: outlet at the inlet T, W = n*R*T*ln(P1/P0)/eff."""
         self.F1.n = self.F0.n
         self.F1.Xi = self.F0.Xi
         self.F1.T = self.F0.T

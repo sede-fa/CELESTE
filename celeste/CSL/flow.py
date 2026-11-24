@@ -53,6 +53,7 @@ class Splitter(ModelBase):
         self._split=val
         
     def Eqs(self):
+        """Outlets at the inlet state: n_F1 = split*n_F0, n_F2 = (1 - split)*n_F0."""
         self.F1.Medium.PTX = self.F0.Medium.PTX  
         self.F2.Medium.PTX = self.F0.Medium.PTX 
         self.F1.n = self.split*self.F0.n
@@ -85,6 +86,7 @@ class Mixer(ModelBase):
         self._init_state(self._spread(legacy, ['F0', 'F1', 'F2'], T=T, P=P))
         
     def Eqs(self):
+        """Mass balance n_F2 = n_F0 + n_F1, component balance, outlet P = P_F0, adiabatic mixing (outlet enthalpy from the feeds)."""
         self.F2.n = (self.F0.n + self.F1.n)
         self.F2.Xi = (self.F1.Xi*self.F1.n + self.F0.Xi*self.F0.n)/self.F2.n
         self.F2.P = self.F0.P 

@@ -54,6 +54,7 @@ class HexBase(ModelBase):
         self.__C0: interfaces.Flange = interfaces.Flange(name + '.__C0', Medium=MediumC1)
 
     def Eqs(self):
+        """Energy balance of each side with the duty Q = epsilon*Qmax: h_H0 - h_H1 = Q/n_H and h_C1 - h_C0 = Q/n_C (unknowns H1.T, C1.T)."""
         self.H1.n = self.H0.n
         self.C1.n = self.C0.n
 
@@ -318,6 +319,7 @@ class Heater(ModelBase):
         self._init_state(legacy)
         
     def Eqs(self):
+        """Outlet has the inlet flow, composition and pressure; the temperature or duty is prescribed."""
         self.F1.n = self.F0.n
         self.F1.Xi = self.F0.Xi
         self.F1.P = self.F0.P

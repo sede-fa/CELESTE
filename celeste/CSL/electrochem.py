@@ -528,6 +528,7 @@ class AEL(ModelBase):
         self.A = A
         
     def Eqs(self):
+        """Species balances of the electrolyser: H2O consumed, H2 and O2 produced from the current (outlet flows and compositions)."""
         y = np.array((
             [self.F0.Xi[0]+self.F0.Xi[3], self.F2.Xi[0]+self.F2.Xi[3], self.F1.Xi[0]+self.F1.Xi[3], 1], # H2O
             [self.F0.Xi[1], self.F2.Xi[1], self.F1.Xi[1], -1], # H2

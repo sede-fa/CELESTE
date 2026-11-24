@@ -10,7 +10,7 @@ version may notice.
 
 - **`SysBase.pfd()`**: interactive process flow diagram (layered layout, orthogonal streams, recycles dashed;
   stream state and composition and unit duties on hover) as one self-contained HTML file
-- **`equations()` / `print_equations()`**: what each unit of a system solves - units with a system of equations (equation count, unknowns, residual at the current state, description of the active `Eqs`) and algorithmic units
+- **`equations()` / `print_equations()`**: what each unit of a system solves - units with a system of equations (equation count, unknowns, residual at the current state, description of the active `Eqs`) and algorithmic units. The `Eqs` of the heat exchangers, mixer, splitter, valve, pump, compressors and the black-box units now carry a one-line description of their equations.
 - **Design specifications**: `SysBase.add_spec(target, value, vary=..., bounds=...)`, `specs`, `clear_specs()`,
   `solve_specs()` - targets and inputs as dotted paths (or a function of the system); docs/flowsheets.md
 - **SOC ASR temperature**: `SOC(..., ASR_T=)`: `'mean'` (default, the previous behaviour: averaged over the charge along
