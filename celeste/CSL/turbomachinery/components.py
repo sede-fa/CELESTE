@@ -8,6 +8,7 @@ import scipy.optimize as spo
 from .. import ModelBase, interfaces, media
 from .corrections import R_UNIVERSAL, Wcorr_from_mf, delta, theta
 from .maps import CompressorMap, TurbineMap
+from ...pfd.views import safe
 
 
 class _MappedMixin:
@@ -213,6 +214,14 @@ class Compressor(_RealGasPath, ModelBase):
         Exloss: exergy destruction [kJ/s], Sgen: entropy generation [kJ/K/s], Exeff: exergy efficiency
     """
     _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=398.15, P=3.0)}
+
+    pfd_kind = 'pressure'
+
+    def pfd_view(self):
+        '''Pressure ratio, efficiency and outlet temperature.'''
+        eff = safe(self, 'eff')
+        return (super().pfd_view().add('PR', self.F1.P/self.F0.P if self.F0.P else None)
+                .add('efficiency', eff if eff is not None else safe(self, 'eta')).add('T out', self.F1.T, 'K'))
 
     def __init__(self, name:str, Medium:media.Medium_Base, eff:float=1.0, **legacy):
         super().__init__(locals())
@@ -434,6 +443,13 @@ class Turbine(_RealGasPath, ModelBase):
         Work efficiency, 0 < eff <= 1. Currently not used to build the flanges.
     """
     _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=398.15, P=3.0)}
+
+    pfd_kind = 'pressure'
+
+    def pfd_view(self):
+        '''Pressure ratio, efficiency and outlet temperature.'''
+        return (super().pfd_view().add('PR', self.F0.P/self.F1.P if self.F1.P else None)
+                .add('efficiency', safe(self, 'eta')).add('T out', self.F1.T, 'K'))
 
     def __init__(self, name: str, Medium: media.Medium_Base, eff: float = None, **legacy):
         super().__init__(locals())

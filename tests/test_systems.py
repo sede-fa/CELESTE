@@ -405,3 +405,42 @@ def test_equations_listing():
     assert df.loc['HT_F0', 'solved_as'] == 'algorithmic'
     text = s.print_equations()
     assert 'soc (SOC): 2 equations in 2 unknowns' in text and 'HT_F0 (Heater)' in text
+
+
+def test_pfd_views():
+    import json
+    import re
+    from celeste.pfd import StreamView, Terminal, UnitView, draw
+
+    def tips(page):
+        return json.loads(re.search(r'const TIPS = (\{.*?\});\n', page).group(1))
+
+    soc = SOCsystem.SOCsysRecupe('s', I=10., Ncells=1000, na0=0.5)
+    soc.run_sol()
+    t = tips(soc.pfd().html)
+    assert any('V cell' in v and 'SOC' in v for v in t.values())               # unit family rows
+    assert any('effectiveness' in v for v in t.values())
+    # one unit replaced in this drawing, by name or by class
+    t = tips(soc.pfd(views={'soc': lambda u: UnitView('electrochem').add('ASR', u.ASR_mean, 'ohm cm2')}).html)
+    assert any('ASR' in v for v in t.values()) and not any('V cell' in v for v in t.values())
+    t = tips(soc.pfd(views={heat.Heater: lambda u: UnitView('heat', subtitle='my heater')}).html)
+    assert sum('my heater' in v for v in t.values()) == 2
+
+    # any objects with pfd_view can be drawn, without CELESTE units
+    class Box:
+        def __init__(self, kind):
+            self.kind = kind
+
+        def pfd_view(self):
+            return UnitView(self.kind).add('size', 3.0, 'm')
+
+    class Pipe:
+        def pfd_view(self):
+            return StreamView(subtitle='water').add('n', 2.0, 'mol/s')
+
+    pfd = draw('toy', {'pump': Box('pressure'), 'tank': Box('separation'), 'odd': object()},
+               [(Terminal('in'), 'pump', Pipe(), None), ('pump', 'tank', Pipe(), None), ('tank', 'odd', None, 't->o'),
+                ('tank', 'pump', Pipe(), 'recycle')])
+    t = tips(pfd.html)
+    assert any('size' in v for v in t.values()) and any('water' in v for v in t.values())
+    assert '3 units, 4 streams; 1 back stream' in pfd.html

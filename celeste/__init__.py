@@ -20,7 +20,7 @@ except PackageNotFoundError:
 
 # 1. Base - Makes variables for all inputs when creating models
 
-__all__ = ["Base", "CSL", "FT", "HEN", "jx", "solvers", "functions"]
+__all__ = ["Base", "CSL", "FT", "HEN", "jx", "pfd", "solvers", "functions"]
 
 _SUBPACKAGES = frozenset(__all__[1:])
 

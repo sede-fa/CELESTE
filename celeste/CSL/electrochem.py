@@ -10,6 +10,7 @@ from .. import solvers
 import numpy as np
 from .._types import Array
 from celeste import functions as funs
+from ..pfd.views import safe
 
 F_CONST = 96485  #: Faraday constant used by the electrochemical models, C/mol
 
@@ -46,6 +47,14 @@ class _FuelStack(ModelBase):
     '''
     ELEMENTS = eq.FUEL_ELEMENTS                       # rows C, H, O, N
     _H2, _H2O = np.eye(6)[0], np.eye(6)[4]            # unit vectors of the fuel species
+
+    pfd_kind = 'electrochem'
+
+    def pfd_view(self):
+        '''Current, current density, ideal and operating cell voltage, reactant conversion and outlet temperature.'''
+        return (super().pfd_view().add('I', self.I, 'A').add('j', safe(self, 'j'), 'A/cm2')
+                .add('V ideal', safe(self, 'Vid'), 'V').add('V cell', safe(self, 'Vop'), 'V')
+                .add('conversion', safe(self, 'RC')).add('T out', self.F1.T, 'K'))
 
     def __init__(self, name: str, MediumF: media.Medium_Base, MediumA: media.Medium_Base, T_in, P_in, T, Q, V_model, n_nodes,
                  ASR_T: str = 'mean', **params):
@@ -516,6 +525,12 @@ class AEL(ModelBase):
     _default_state = {'F0': dict(n=1.0, Xi=np.array([1., 0., 0., 0.])),      # ['H2O(L)', 'H2', 'O2', 'H2O']
                       'F1': dict(n=1.0),
                       'F2': dict(n=1.0, Xi=np.array([0., 0., 1., 0.]))}
+
+    pfd_kind = 'electrochem'
+
+    def pfd_view(self):
+        '''Current density and temperature.'''
+        return super().pfd_view().add('j', safe(self, 'j'), 'A/cm2').add('T', safe(self, 'T'), 'K')
 
     def __init__(self, name: str, Medium: media.Medium_Base, T: float = 298.15, P: float = 1., j: float = -0.32,
                  Ncells: int | None = None, A: float | None = None, **legacy):

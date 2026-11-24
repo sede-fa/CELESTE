@@ -11,6 +11,7 @@ from . import media
 from .. import Base, solvers
 from . import exergy as _exergy
 from ..functions import carbonFraction
+from ..pfd.views import StreamView, safe
 
 class Flange(Base):
     '''
@@ -53,6 +54,21 @@ class Flange(Base):
 
         # The superclass Base() already makes the following assignments. But it's repeated here just for the sake of avoiding Pyright warnings/errors.
         self.n: float = n
+
+    def pfd_view(self) -> StreamView:
+        '''What the process flow diagram shows of the stream leaving this flange: state, exergy and composition.'''
+        view = StreamView(subtitle=type(self.Medium).__name__)
+        view.add('n', self.n, 'mol/s').add('m', safe(self, 'm'), 'g/s').add('T', self.T, 'K').add('P', self.P, 'bar')
+        view.add('h', safe(self, 'h'), 'kJ/mol').add('Ex', safe(self, 'Ex'), 'kJ/mol')
+        phase = getattr(self, 'phase', None)
+        if isinstance(phase, str):
+            view.add('phase', phase)
+        try:
+            Xi = np.asarray(self.Xi, dtype=float)
+            view.composition = [(str(sp), float(x)) for x, sp in sorted(zip(Xi, self.Medium.species), reverse=True) if x > 1e-6]
+        except Exception:
+            pass
+        return view
 
     @property
     def mw(self) -> float:

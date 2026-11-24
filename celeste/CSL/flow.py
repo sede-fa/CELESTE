@@ -13,6 +13,8 @@ class SourceM(ModelBase):
     '''
     1+nSpecies unknowns
     '''
+    pfd_kind = 'terminal'
+
     def __init__(self, name: str, Medium: media.Medium_Base, F1_n:float=1., F1_Xi:npt.NDArray[float] | None =None, F1_T:float=298.15, F1_P:float=1.):
         super().__init__(locals())
         self.name = f'{name}(({name}))'
@@ -23,6 +25,8 @@ class Sink(ModelBase):
     '''
     2*(1+nSpecies) unknowns
     '''
+    pfd_kind = 'terminal'
+
     def __init__(self, name: str, Medium: media.Medium_Base, **legacy):
         super().__init__(locals())
 
@@ -33,6 +37,12 @@ class Sink(ModelBase):
 class Splitter(ModelBase):
     
     """Splits F0 into F1 (fraction ``Split``) and F2 (the rest) at the inlet state."""
+
+    pfd_kind = 'flow'
+
+    def pfd_view(self):
+        '''Fraction of the feed that goes to F1.'''
+        return super().pfd_view().add('split to F1', self.split)
 
     def __init__(self, name: str, Medium: media.Medium_Base, Split: float = 0.5, **legacy):
         super().__init__(locals())
@@ -74,6 +84,8 @@ class Mixer(ModelBase):
     _inlet_ports = ('F0', 'F1')   # two feeds, one product (F2)
     
     """Adiabatic mixer of the feeds F0 and F1 into F2 at the pressure of F0."""
+
+    pfd_kind = 'flow'
 
     def __init__(self, name: str, Medium: media.Medium_Base, **legacy):
         super().__init__(locals())

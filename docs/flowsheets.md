@@ -49,3 +49,35 @@ the same choice as `solve_order`), units are placed by their longest path from t
 column is improved by barycentre sweeps, and the streams are routed orthogonally - recycles along lanes below
 the units. Colours mark the unit type (heat exchange, reactor, electrochemical, separation, pressure change,
 mixer/splitter, subsystem). `create_graph('mermaid')` and `create_graph('networkx')` remain available.
+
+### What the diagram shows
+
+The drawing lives in its own package, `celeste.pfd`, which knows nothing about CELESTE units: every unit and
+stream describes itself with a `pfd_view()` method.
+
+- `ModelBase.pfd_view()` returns a `UnitView`: `kind` (the colour of the box, class attribute `pfd_kind`) and the
+  rows Q, W, Ex loss and converged. Unit families add their own rows: heat exchangers the effectiveness and the
+  temperatures of both sides, heaters T in / out, compressors and turbines PR, efficiency and T out, SOC/PCC the
+  current, j, ideal and cell voltage, conversion and T out, reactors T, P and the extents, the flash drum T, P and
+  the vapour fraction, the splitter its split.
+- `Flange.pfd_view()` returns a `StreamView`: n, m, T, P, h, Ex (and the phase) and the composition.
+
+To show something else, override `pfd_view` in your class:
+
+```python
+class MyStack(electrochem.SOC):
+    def pfd_view(self):
+        return super().pfd_view().add('ASR', self.ASR_mean, 'ohm cm2')
+```
+
+or replace the view of some units in one drawing, by name or by class:
+
+```python
+from celeste.pfd import UnitView
+plant.pfd(views={'soc': lambda u: UnitView('electrochem').add('V', u.Vop, 'V'),
+                 heat.Heater: lambda u: UnitView('heat').add('Q', u.Q, 'kW')})
+```
+
+`celeste.pfd.draw(name, units, streams)` draws any flowsheet from `{label: unit}` and
+`[(source, destination, stream, title)]` (sources and destinations are labels or `Terminal`s), so other models can
+use the same diagrams by giving their objects a `pfd_view`.

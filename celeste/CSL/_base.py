@@ -4,6 +4,7 @@ import scipy.optimize as spo
 
 from .interfaces import Flange
 from .. import Base
+from ..pfd.views import UnitView, safe
 
 from ._mixin.introspection import IntrospectionMixin
 from ._mixin.graph import GraphMixin
@@ -15,6 +16,18 @@ from ._mixin.pfd import PFDMixin
 
 from typing import Any
 from numpy._typing._array_like import NDArray
+
+_KIND_BY_NAME = [   # fragment of the module or class name -> kind of box, for classes without ``pfd_kind``
+    ('electrochem', 'electrochem'), ('reactors', 'reaction'), ('turbomachinery', 'pressure'), ('heat', 'heat'),
+    ('separation', 'separation'), ('GPU', 'separation'), ('Dist', 'separation'), ('Comp', 'pressure'),
+    ('Pump', 'pressure'), ('Valve', 'pressure'), ('Source', 'terminal'), ('Sink', 'terminal'), ('flow', 'flow'),
+]
+
+
+def _kind_from_class(cls) -> str:
+    names = [cls.__module__, cls.__name__] + [c.__name__ for c in cls.__mro__]
+    return next((kind for key, kind in _KIND_BY_NAME if any(key in n for n in names)), 'other')
+
 
 class ModelBase(Base):
     '''
@@ -29,9 +42,24 @@ class ModelBase(Base):
     * ``Exloss`` is the exergy destroyed in kJ/s, ``Sgen`` the entropy generated in kJ/K/s
     '''
 
+    #: kind of box in the process flow diagram (a key of ``celeste.pfd.KINDS``); None: from the module of the class
+    pfd_kind: str | None = None
+
     def __init__(self, args):
         super().__init__(args)
         self.Eq = np.array([])
+
+    def pfd_view(self) -> UnitView:
+        """
+        What the process flow diagram shows of this unit: heat, work, exergy loss and whether its solve converged.
+        Unit families add their own rows: ``return super().pfd_view().add('PR', self.F1.P/self.F0.P)``.
+        """
+        view = UnitView(self.pfd_kind or _kind_from_class(type(self)))
+        view.add('Q', safe(self, 'Q'), 'kW').add('W', safe(self, 'W'), 'kW').add('Ex loss', safe(self, 'Exloss'), 'kW')
+        sol = self.__dict__.get('_sol')
+        if sol is not None and hasattr(sol, 'success'):
+            view.add('converged', bool(sol.success))
+        return view
 
     def sol_seq(self):
         return None
@@ -179,6 +207,7 @@ class ModelBase(Base):
 
 class SysBase(FlowsheetMixin, SpecMixin, PFDMixin, GraphMixin, ReportingMixin, IntrospectionMixin, RecycleMixin, ModelBase):
     _is_system=True
+    pfd_kind = 'system'
     def __init__(self, args): # name,
         super().__init__(args) #
 

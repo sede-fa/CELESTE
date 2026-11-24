@@ -7,6 +7,7 @@ from .. import solvers
 import numpy as np
 from numpy.typing import NDArray as npArray
 from typing import Callable, override, Literal 
+from ..pfd.views import safe
 
 class HexBase(ModelBase):
     """      
@@ -40,6 +41,14 @@ class HexBase(ModelBase):
     #     1) H1 = Hex('H1', MediumH=media.Air(), MediumC=media.Air(),)
 
     """
+
+    pfd_kind = 'heat'
+
+    def pfd_view(self):
+        '''Duty, effectiveness and the temperatures of both sides.'''
+        return (super().pfd_view().add('effectiveness', safe(self, 'epsilon'))
+                .add('hot in / out', f'{self.H0.T:.1f} / {self.H1.T:.1f}', 'K')
+                .add('cold in / out', f'{self.C0.T:.1f} / {self.C1.T:.1f}', 'K'))
 
     def __init__(self, name:str, MediumH0:media.Medium_Base, MediumC0:media.Medium_Base,
                  MediumH1:media.Medium_Base, MediumC1:media.Medium_Base):
@@ -310,6 +319,12 @@ class Heater(ModelBase):
     
     """
     
+    pfd_kind = 'heat'
+
+    def pfd_view(self):
+        '''Duty and the inlet and outlet temperature.'''
+        return super().pfd_view().add('T in / out', f'{self.F0.T:.1f} / {self.F1.T:.1f}', 'K')
+
     def __init__(self, name:str, Medium0:media.Medium_Base, Medium1:media.Medium_Base|None=None, **legacy):
         Medium1 = Medium0 if Medium1 is None else Medium1
         super().__init__(locals())

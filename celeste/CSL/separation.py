@@ -78,6 +78,13 @@ class Flash(ModelBase):
         fl = Flash('fl', Medium=media.Fuel_MeOH(), P=1.2, Q=0.0, ...)
     """
 
+    pfd_kind = 'separation'
+
+    def pfd_view(self):
+        '''Drum temperature and pressure, and the vapour fraction of the feed.'''
+        return (super().pfd_view().add('T', self.F1.T, 'K').add('P', self.F1.P, 'bar')
+                .add('vapour fraction', self.F1.n/self.F0.n if self.F0.n else None))
+
     def __init__(self, name:str, Medium:media.Medium_Base, MediumL:media.Medium_Base|None=None,
                  T:float|None=None, P:float|None=None, Q:float|None=None, dP:float=0.0, kij=None,
                  T_bounds:tuple=(150.0, 1500.0), **legacy):

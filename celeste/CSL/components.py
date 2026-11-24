@@ -18,6 +18,8 @@ class GPUbase(ModelBase):
       energy balance closes (``heat_and_work()`` = W + Q_amb). It is not reported as process heat.
     * ``Exloss`` = exergy in + W - exergy out, ``Sgen`` = ΔS - Q_amb/T0, so Exloss = T0·Sgen.
     """
+    pfd_kind = 'separation'
+
     def __init__(self, name: str, eff, args):
         params = {k: v for k, v in dict(args).items() if k not in ('self', '__class__', 'legacy')}
         super().__init__({**params, 'name': name, 'eff': eff})
@@ -329,6 +331,12 @@ class Pump(ModelBase):
     _default_state = {'F0': dict(n=1.0, Xi=[0., 0., 0., 0., 1., 0.], T=298.15, P=1.0),
                       'F1': dict(n=1.0, T=298.15, P=3.0)}
 
+    pfd_kind = 'pressure'
+
+    def pfd_view(self):
+        '''Inlet and outlet pressure.'''
+        return super().pfd_view().add('P in / out', f'{self.F0.P:.4g} / {self.F1.P:.4g}', 'bar')
+
     def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4L(), eff:float=1.0,
                  P_out:float|None=None, dP:float|None=None, **legacy):
         if P_out is not None and dP is not None:
@@ -408,6 +416,12 @@ class Valve(ModelBase):
     _default_state = {'F0': dict(n=1.0, T=298.15, P=3.0), 'F1': dict(n=1.0, T=298.15, P=1.0)}
     W = 0.0
     Q = 0.0
+
+    pfd_kind = 'pressure'
+
+    def pfd_view(self):
+        '''Inlet and outlet pressure.'''
+        return super().pfd_view().add('P in / out', f'{self.F0.P:.4g} / {self.F1.P:.4g}', 'bar')
 
     def __init__(self, name:str, Medium:media.Medium_Base=media.Fuel_CH4(), P_out:float|None=None,
                  dP:float|None=None, **legacy):
