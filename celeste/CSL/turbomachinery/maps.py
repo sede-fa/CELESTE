@@ -190,7 +190,7 @@ class _MapBase:
                                  PR=PR_des, Efficiency=eff_des, Wcorr=Wcorr_des)
         self.log.append({"action": "calibrate_design",
                          "sWc": self._sWc, "sPR": self._sPR, "sE": self._sE})
-        print(f"[{type(self).__name__}] Calibrated — sWc={self._sWc:.4f}, "
+        print(f"[{type(self).__name__}] Calibrated - sWc={self._sWc:.4f}, "
               f"sPR={self._sPR:.4f}, sE={self._sE:.4f}")
 
     def _log_scale_map(self, scaled, sWc, sPR, sE):
@@ -380,7 +380,7 @@ class CompressorMap(_MapBase):
         try:
             return PR > self._surge_pr_at(wcorr)
         except ValueError:
-            return False  # outside surge curve range — assume not in surge
+            return False  # outside surge curve range - assume not in surge
 
     # -- public API ------------------------------------------------------- #
     def query(self, ncorr: float, beta: float, plot: bool = False) -> CompressorState:
@@ -579,7 +579,7 @@ class TurbineMap(_MapBase):
                   new_name: str = None) -> "TurbineMap":
         """
         Create a new TurbineMap instance with the map arrays pre-scaled
-        by the given factors. The new instance is independent — modifying
+        by the given factors. The new instance is independent - modifying
         it does not affect the original.
 
         This is different from calibrate_design(), which stores scalars
@@ -700,7 +700,7 @@ class TurbineMap(_MapBase):
             self._draw_highlights(ax, highlight_point, highlight_label, highlight_color)
 
         suffix = " (scaled)" if scaled else " (raw)"
-        ax.set_title(f"{self.namemap} — PR vs Wcorr x Ncorr{suffix}",
+        ax.set_title(f"{self.namemap} - PR vs Wcorr x Ncorr{suffix}",
                      fontsize=16, fontweight='bold')
         ax.set_xlabel("Wcorr x Ncorr", fontsize=14)
         ax.set_ylabel("Pressure Ratio", fontsize=14)

@@ -13,10 +13,10 @@ Behaviour that is intended but surprising is listed in
 ## Exergy data
 
 - For reacting units, `Exloss` and `T0·Sgen` differ by up to a few tenths of a
-  percent of `Exloss` (SOC test cases: 0.001–0.09 kW, 0.15–0.35 %). Two causes:
+  percent of `Exloss` (SOC test cases: 0.001-0.09 kW, 0.15-0.35 %). Two causes:
   the tabulated standard chemical exergies (`celeste/data/Chem_exergies.csv`)
   do not match the NASA Gibbs energies exactly (per mol of reaction 0.34 kJ for
-  methane reforming, −0.02 kJ for the shift, 0.004 kJ for hydrogen oxidation),
+  methane reforming, -0.02 kJ for the shift, 0.004 kJ for hydrogen oxidation),
   and water that condenses at the dead state makes the composition term of the
   exergy nonlinear (see the exergy definition in `docs/thermodynamics.md`).
   Deriving the chemical exergies of the reference species from the NASA data

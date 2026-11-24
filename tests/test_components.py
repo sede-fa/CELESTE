@@ -139,7 +139,7 @@ def test_valve_pressure_specification(spec):
 
 
 def test_valve_is_isenthalpic_for_real_fluids():
-    """Throttling a real gas cools it (Joule–Thomson); enthalpy is conserved."""
+    """Throttling a real gas cools it (Joule-Thomson); enthalpy is conserved."""
     v = components.Valve('v', media.Fuel_CH4_PR(), P_out=5.0)
     v.F0.n = 1.0
     v.F0.Xi = np.array([0.1, 0.8, 0.05, 0.03, 0.01, 0.01])

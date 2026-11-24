@@ -9,14 +9,14 @@ n_O = Ncells·I/(2F) (negative in electrolysis). The system of equations (`Eqs`)
 
 | Unknown | Equation |
 |---|---|
-| ξ_WGS, ξ_MSR (CO2 formed, CH4 converted) | WGS equilibrium, K_WGS·x_CO·x_H2O − x_CO2·x_H2 = 0 |
-| | MSR equilibrium, K_MSR·x_CH4·x_H2O − x_CO·x_H2³·P² = 0 |
-| T_out (only with `Q=`) | energy balance, (Q − Q_spec)/n_feed = 0 |
+| ξ_WGS, ξ_MSR (CO2 formed, CH4 converted) | WGS equilibrium, K_WGS·x_CO·x_H2O - x_CO2·x_H2 = 0 |
+| | MSR equilibrium, K_MSR·x_CH4·x_H2O - x_CO·x_H2³·P² = 0 |
+| T_out (only with `Q=`) | energy balance, (Q - Q_spec)/n_feed = 0 |
 
 The fuel outlet follows from the extents, `n = n_feed + fuel_transfer + ξ·ν` (`fuel_flows`; ν is
 `equilibrium.FUEL_NU`): the charge transfer moves the oxygen (SOC: H2 → H2O) or the protons (PCC: H2 leaves), the
 two reactions do the rest, so the element balances hold by construction and only the two equilibria remain as
-equations. They are written as K − Q multiplied by the reactant fractions, so that trace species (1e-8 CH4 in an
+equations. They are written as K - Q multiplied by the reactant fractions, so that trace species (1e-8 CH4 in an
 electrolysis feed) do not divide, and divided by min(K, 1), because K_MSR spans 1e-10 to 1e4 between 500 and 1300 K and the residual must stay meaningful at low temperature. Setting `T=` (isothermal, 2
 unknowns: `Eqs_T`, `f_sol_T`) or `Q=` (heat duty, 3 unknowns, outlet
 temperature solved together with the extents: `Eqs_Q`, `f_sol_Q`) selects
@@ -46,20 +46,20 @@ on `F0` and `A0`.
 The reversible potential at a point in the cell is the Nernst potential of
 H2 + ½ O2 → H2O at the local temperature and composition:
 
-    E = −ΔG_r(T, x, P)/(2F),   ΔG_r = g°_H2O − g°_H2 − ½ g°_O2 + RT ln( x_H2O / (x_H2 · (x_O2·P)^½) )
+    E = -ΔG_r(T, x, P)/(2F),   ΔG_r = g°_H2O - g°_H2 - ½ g°_O2 + RT ln( x_H2O / (x_H2 · (x_O2·P)^½) )
 
 It changes along the cell as the fuel converts. `V_model` chooses which value
 the stack uses:
 
 | `V_model` | Ideal voltage | Use |
 |---|---|---|
-| `'mean'` (default) | E averaged over the charge passed, Vid = ∫₀¹ E(λ) dλ, where λ is the fraction of the current drawn so far, the composition at λ is the local equilibrium and T is linear in λ from the fuel inlet to the outlet | reversible work of the stack: Wid = Vid·(−I)·Ncells |
+| `'mean'` (default) | E averaged over the charge passed, Vid = ∫₀¹ E(λ) dλ, where λ is the fraction of the current drawn so far, the composition at λ is the local equilibrium and T is linear in λ from the fuel inlet to the outlet | reversible work of the stack: Wid = Vid·(-I)·Ncells |
 | `'outlet'` | E at the outlet | limit for a stack whose cells run at one voltage: the outlet is where the local Nernst potential is highest (electrolysis) or lowest (fuel cell) |
 | `'average'` | E at the arithmetic mean of the inlet and outlet mole fractions, at the outlet temperature | the former `SOC_Nernst_avg` |
-| `'streams'` | (G_out − G_in)/(−I·Ncells) of the streams | the former model, for comparison |
+| `'streams'` | (G_out - G_in)/(-I·Ncells) of the streams | the former model, for comparison |
 
 All four are available as `V_mean`, `V_nernst_out`, `V_average` and `V_streams`
-(`V_nernst_in` gives the inlet value); `Wid = −Vid·I·Ncells` is the ideal work. `Vop = Vid − f_ASR·ASR·j`, with the
+(`V_nernst_in` gives the inlet value); `Wid = -Vid·I·Ncells` is the ideal work. `Vop = Vid - f_ASR·ASR·j`, with the
 area-specific resistance averaged along the cell (`ASR_mean`; T is linear in
 the charge, so a four-point quadrature is exact to rounding). The voltages are properties, computed
 when read.
@@ -70,7 +70,7 @@ check this to 1e-9 V): the Gibbs energy difference of the streams is the
 integral of ΔG_r over the extent of the electrochemical reaction, and the
 shift and reforming reactions add nothing because their ΔG_r is zero at
 equilibrium. When the temperature changes along the cell, the stream difference
-G_out(T1) − G_in(T0) also contains −∫S dT, the change of Gibbs energy from
+G_out(T1) - G_in(T0) also contains -∫S dT, the change of Gibbs energy from
 heating the gas, which is not electrochemical work. `V_streams` then stops being a
 voltage (in the adiabatic electrolysis test case it differs from the Nernst
 values by several volts). The charge-averaged Nernst potential is the

@@ -11,7 +11,7 @@ them too; existing user models are not affected by any of this.
 | pressure | `P` | bar |
 | molar flow | `n` | mol/s |
 | mass flow | `m` | g/s |
-| mole / mass fractions | `Xi` / `Yi` | – |
+| mole / mass fractions | `Xi` / `Yi` | - |
 | enthalpy, Gibbs energy, exergy, LHV | `h`, `g`, `Ex`, `LHV` | kJ/mol |
 | entropy, heat capacity | `s`, `cp` | kJ/mol/K |
 | heat, work, exergy loss | `Q`, `W`, `Exloss` | kJ/s (kW) |
@@ -123,7 +123,7 @@ their `phase0`, `phase1`, ... arguments: the phase of a port is part of the unit
 | `Q`, `W` | heat and work added |
 | `Exth` | exergy of the heat duty |
 | `Exloss`, `Sgen`, `Exeff` | exergy destroyed, entropy generated, exergy efficiency |
-| `MBcheck()` | prints the relative mass balance error, returns in − out |
+| `MBcheck()` | prints the relative mass balance error, returns in - out |
 
 Units that are evaluated explicitly need no `f_sol`.
 
@@ -132,7 +132,7 @@ Units that are evaluated explicitly need no `f_sol`.
 Use `celeste.solvers.solve(fun, x0, bounds=..., scale=..., name=...)` instead of
 calling SciPy directly:
 
-- give **bounds** whenever the unknowns have physical limits – a root with
+- give **bounds** whenever the unknowns have physical limits - a root with
   negative mole fractions is then never returned as a solution;
 - `scale` is the typical size of the residuals (usually the feed flow);
 - the result has `success`, `residual_norm` and `method`; the model is left at
@@ -176,8 +176,8 @@ the ports of a box are followed through to the units inside it. On top of that:
 
 | Method | Returns |
 |---|---|
-| `MBcheck()` | mass in − mass out over the boundary, g/s |
-| `EBcheck()` | enthalpy in + Σ(Q + W) − enthalpy out, kJ/s (`q_in`, `q_out` keep the enthalpy flows) |
+| `MBcheck()` | mass in - mass out over the boundary, g/s |
+| `EBcheck()` | enthalpy in + Σ(Q + W) - enthalpy out, kJ/s (`q_in`, `q_out` keep the enthalpy flows) |
 | `unit_balances()` | mass and energy residual of every unit, to find where a balance does not close |
 
 ## Media
@@ -202,7 +202,7 @@ Existing public names are kept as they are (`run_sol`, `Eqs`, `MBcheck`,
 - classes in `CamelCase`, functions, methods and arguments in `snake_case`;
 - no flange state in the constructor: set it on the flange (`unit.F0.n = ...`);
 - temperatures of a unit as `T_<what>` (`T_cond`, `T_soc0`);
-- no `print` in models – return values, or warn through `warnings`.
+- no `print` in models - return values, or warn through `warnings`.
 
 ## Retiring a name
 

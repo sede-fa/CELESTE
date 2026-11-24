@@ -1,7 +1,7 @@
-# Vapour–liquid flash
+# Vapour-liquid flash
 
 `celeste.CSL.separation.Flash` splits a feed into a vapour and a liquid stream
-in thermodynamic equilibrium. The split is computed, not prescribed – in
+in thermodynamic equilibrium. The split is computed, not prescribed - in
 contrast to the black-box separators `GPU_2S`, `GPU_2SV2`, `GPU_3S`.
 
     F0 (feed)  ──►  ┌───────┐ ──►  F1 (vapour)
@@ -49,8 +49,8 @@ self.connect_seq(self.drum.F2, self.water_sink.F0, store=store)   # condensate
 
 ## Two ways to use it
 
-**With the ideal-gas (NASA) media** – `Flash('d', Medium=media.Fuel_MeOH())`.
-The K-values come from the Peng–Robinson equation, the stream properties from
+**With the ideal-gas (NASA) media** - `Flash('d', Medium=media.Fuel_MeOH())`.
+The K-values come from the Peng-Robinson equation, the stream properties from
 the media: `F1` uses `Medium`, `F2` uses its liquid counterpart (`H2O` →
 `H2O(L)`, `CH3OH` → `CH3OH(L)`; dissolved gases keep their gas species). Pass
 `MediumL=` to choose the liquid medium yourself. This fits into existing
@@ -61,8 +61,8 @@ dew point; the heat of condensation appears in the `Q` of the drum. Because the
 split and the properties come from two models, the exergy balance of the drum
 is closed only approximately (a few per cent of the drum's own contribution).
 
-**With real-fluid media** – `Flash('d', Medium=media.Fuel_MeOH_PR())`. Feed and
-products use the same Peng–Robinson model, so energy, entropy and exergy
+**With real-fluid media** - `Flash('d', Medium=media.Fuel_MeOH_PR())`. Feed and
+products use the same Peng-Robinson model, so energy, entropy and exergy
 balances are consistent, and upstream units already know the phase state of
 their streams (a cooler with such a medium condenses).
 
@@ -77,7 +77,7 @@ their streams (a cooler with such a medium condenses).
    poor first guess.
 2. **Phase split** by successive substitution on ln K, started from the
    K-values of the stability test and accelerated every fifth step.
-3. **Rachford–Rice** equation solved by a bracketed Newton iteration between
+3. **Rachford-Rice** equation solved by a bracketed Newton iteration between
    its asymptotes.
 
 The adiabatic flash wraps this in a bracketing search for the temperature; the
@@ -92,8 +92,8 @@ Everything runs in fixed-shape JAX loops: the flash can be compiled, vectorised
 |---|---|
 | fugacity coefficients and departure functions against derivatives of the Gibbs energy (automatic differentiation) | agree to 1e-12 |
 | saturation pressure of water, methanol, ammonia, CO2 against reference equations | < 1 % |
-| flash against an independent Peng–Robinson implementation (`thermo` library) | 6 digits |
-| 4000 random flashes, 7 components, 250–650 K, 0.3–300 bar | all converged; component balance 1e-16; fugacity equality 1e-11 |
+| flash against an independent Peng-Robinson implementation (`thermo` library) | 6 digits |
+| 4000 random flashes, 7 components, 250-650 K, 0.3-300 bar | all converged; component balance 1e-16; fugacity equality 1e-11 |
 | single-phase results | pass the stability test |
 | vapour fraction along an isobar | monotonic |
 
@@ -105,15 +105,15 @@ Everything runs in fixed-shape JAX loops: the flash can be compiled, vectorised
   two-phase results. `celeste.jx.flash.stability` applied to the outlet
   compositions reveals such cases.
 - Electrolytes, association and solids are not described.
-- Peng–Robinson with one interaction parameter is approximate for strongly
-  non-ideal liquids (water–alcohol): compositions of the liquid phase should
+- Peng-Robinson with one interaction parameter is approximate for strongly
+  non-ideal liquids (water-alcohol): compositions of the liquid phase should
   be checked against data if they matter.
 - Compilation takes a few seconds for every new set of species.
 
-## Fischer–Tropsch streams: Raoult flash
+## Fischer-Tropsch streams: Raoult flash
 
 `celeste.FT.componentsFT.Flash` is a simpler flash for FT media (`mediaFT.*`),
-where Peng–Robinson data for 50 hydrocarbons would be needed otherwise:
+where Peng-Robinson data for 50 hydrocarbons would be needed otherwise:
 
 - The hydrocarbons C2+ form an ideal liquid solution: y_i P = x_i Psat_i.
 - Water condenses as a separate, pure liquid: y_w P = Psat_w (water and
@@ -122,10 +122,10 @@ where Peng–Robinson data for 50 hydrocarbons would be needed otherwise:
 - H2, CO, CO2, N2, CH4 and every species above its critical temperature do not
   dissolve.
 
-The hydrocarbon vapour pressures come from the same Clausius–Clapeyron
+The hydrocarbon vapour pressures come from the same Clausius-Clapeyron
 integral that gives the FT liquid entropy (`thermoFT.vapour_pressures`), so
 the split and the stream enthalpies are consistent; water uses the
-Wagner–Pruss equation. Pentane boils at 1.013 bar at 309.2 K, hexane has
+Wagner-Pruss equation. Pentane boils at 1.013 bar at 309.2 K, hexane has
 0.33 bar at 309 K (Yaws).
 
 ```python

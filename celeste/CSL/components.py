@@ -397,7 +397,7 @@ class Valve(ModelBase):
 
     The outlet temperature follows from h(T1, P1) = h(T0, P0). For ideal-gas media
     the enthalpy does not depend on pressure and T1 = T0; real-fluid media
-    (``*_PR``) show the Joule–Thomson effect.
+    (``*_PR``) show the Joule-Thomson effect.
 
     Parameters:
         name:   objects name

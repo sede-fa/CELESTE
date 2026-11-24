@@ -26,21 +26,21 @@ open problems are listed in [known_issues.md](known_issues.md).
 
 ## Thermodynamics
 
-- **Ideal-gas media have no Joule–Thomson effect.** An isenthalpic `Valve`
+- **Ideal-gas media have no Joule-Thomson effect.** An isenthalpic `Valve`
   keeps the temperature of a NASA (ideal-gas) medium; use a `*_PR` medium to
   see throttling cooling.
 - **`Pump` treats the liquid as incompressible** with the density of the inlet
   medium; the temperature rise comes from the energy balance.
 - **Mixed-model flash.** `Flash` with NASA media takes the phase split from
-  Peng–Robinson and the stream properties from the media. Its exergy balance is
-  therefore approximate (in the methanol loop example the drum shows −0.3 % of
+  Peng-Robinson and the stream properties from the media. Its exergy balance is
+  therefore approximate (in the methanol loop example the drum shows -0.3 % of
   the total exergy destruction). Use real-fluid media where this matters.
 - **`Thermo_CP` with a liquid-forming default composition.** The reference
   state is evaluated without a phase specification while the stream state uses
   the given phase. For `Fuel_CH4_CP()` at its default composition (90 % water,
   298 K) the enthalpy differs from the NASA value by the heat of vaporisation.
 
-## Fischer–Tropsch module
+## Fischer-Tropsch module
 
 - **The FT model does not determine the phase of a stream**; it evaluates the
   phase set on the flange. A liquid flange above the bubble point is still

@@ -4,9 +4,9 @@
 
 | Layer | Module | Status |
 |---|---|---|
-| ideal-gas properties | `celeste.jx.nasa`, `celeste.jx.ideal` | in use – the kernel behind all NASA media |
-| real-gas / liquid properties | `celeste.jx.eos`, `celeste.jx.fluid` | in use – behind `Medium_PRbase` |
-| phase equilibrium | `celeste.jx.flash` | in use – behind `separation.Flash` |
+| ideal-gas properties | `celeste.jx.nasa`, `celeste.jx.ideal` | in use - the kernel behind all NASA media |
+| real-gas / liquid properties | `celeste.jx.eos`, `celeste.jx.fluid` | in use - behind `Medium_PRbase` |
+| phase equilibrium | `celeste.jx.flash` | in use - behind `separation.Flash` |
 | network cost gradients | `celeste.HEN.synthesis` | in use |
 | unit models | `celeste.jx.units` | prototype |
 
@@ -89,14 +89,14 @@ Differences to the CSL worth knowing:
 |---|---|---|
 | equilibrium reactor unknowns | outlet flow and all mole fractions (7) | reaction extents (2), logarithmic mass action laws |
 | compressor | mean heat capacity between inlet and outlet | exact isentropic path (work differs by ≈ 0.5 %) |
-| failure handling | `ConvergenceWarning` | none yet – see below |
+| failure handling | `ConvergenceWarning` | none yet - see below |
 
 ## Real-gas properties without CoolProp
 
 CoolProp cannot be called from compiled JAX code. `celeste.jx.eos` and
 `celeste.jx.fluid` replace it inside the JAX layer:
 
-- Peng–Robinson with an alpha function fitted to saturation pressures, so
+- Peng-Robinson with an alpha function fitted to saturation pressures, so
   vapour pressures are within 1 % of the reference equations;
 - gas, liquid and two-phase states from one function, `fluid.state_pt`;
 - 16 species, extensible through `tools/build_eos_table.py`.
@@ -104,7 +104,7 @@ CoolProp cannot be called from compiled JAX code. `celeste.jx.eos` and
 Accuracy is that of a cubic equation (see `docs/thermodynamics.md`). If higher
 accuracy is needed for a specific fluid, options that stay inside JAX are:
 
-1. volume translation (Péneloux) for liquid densities – a small addition to `eos.py`;
+1. volume translation (Péneloux) for liquid densities - a small addition to `eos.py`;
 2. multi-parameter Helmholtz equations for single fluids (water, CO2, H2):
    the functional forms are explicit in T and ρ and differentiable, but each
    fluid needs its coefficient set and a density solve;
@@ -150,7 +150,7 @@ replaces the Jacobian once the units are available as pure functions.
 
 ## Suggested migration path
 
-1. **Now** – keep modelling in the CSL; use `celeste.jx` for sweeps,
+1. **Now** - keep modelling in the CSL; use `celeste.jx` for sweeps,
    sensitivities and property work. Nothing in existing models has to change.
 2. **Port units one at a time** into `celeste.jx.units`, each with a test
    against its CSL counterpart, starting with explicit units (splitter, valve,

@@ -41,8 +41,8 @@ class ReportingMixin:
 
         Parameters
         ----------
-        exclude     : substrings — drop heaters whose name contains any of these
-        include     : substrings — keep only heaters whose name contains any of these
+        exclude     : substrings - drop heaters whose name contains any of these
+        include     : substrings - keep only heaters whose name contains any of these
                     (takes precedence over exclude)
         min_duty    : minimum |Q| [kW] to include a stream
         min_delta_t : |ΔT| [°C] below which a stream is classified as latent

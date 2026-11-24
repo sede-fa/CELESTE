@@ -53,7 +53,7 @@ LMTD, U, area and cost.
 
 | Argument | Default | Meaning |
 |---|---|---|
-| `dt_min` | – | minimum approach temperature of every exchanger |
+| `dt_min` | - | minimum approach temperature of every exchanger |
 | `n_stages` | max(hot, cold streams), at most 4 | stages of the superstructure; more stages allow more complex networks and take longer |
 | `costs` | `HENCosts()` | utility prices and exchanger cost law |
 | `hot_utility`, `cold_utility` | just outside the stream temperatures | `Utility(T_in, T_out, h)` |
@@ -86,7 +86,7 @@ meet several partners in the same stage (parallel branches, mixed isothermally).
 
 `HENCosts(hot_utility=100, cold_utility=15, unit_fixed=8000, area_coeff=500, area_exp=0.8)`:
 utilities per kW and year, exchangers `unit_fixed + area_coeff · A^area_exp` per
-year. **These defaults are placeholders** – the network depends on them, so set
+year. **These defaults are placeholders** - the network depends on them, so set
 them to project values.
 
 ### Method
@@ -97,11 +97,11 @@ are mixed isothermally; utilities are placed at the stream ends. Solving
 topology and areas at once is a non-convex MINLP that needs a dedicated solver.
 The problem is decomposed instead:
 
-1. **Topology – MILP.** With isothermal mixing all constraints are linear.
+1. **Topology - MILP.** With isothermal mixing all constraints are linear.
    Utility cost plus a fixed charge per exchanger is minimised with HiGHS
    (`scipy.optimize.milp`), `dt_min` enforced at both ends of every exchanger.
    The solver proves optimality of this step.
-2. **Duties and areas – NLP.** For the chosen matches all temperatures are
+2. **Duties and areas - NLP.** For the chosen matches all temperatures are
    linear in the duties. The total annual cost including area cost is minimised
    under linear constraints (SLSQP, exact gradients from JAX). The result is
    kept only if it is feasible and cheaper than the starting point.

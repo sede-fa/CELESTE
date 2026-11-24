@@ -103,7 +103,7 @@ matching `method` and emit a `CelesteDeprecationWarning`.
 
 ## Heat-recovery loops
 
-A feed–effluent heat exchanger (the reactor product heats the reactor feed) is a
+A feed-effluent heat exchanger (the reactor product heats the reactor feed) is a
 loop as well: the hot inlet of the exchanger depends on the reactor, whose inlet
 depends on the exchanger. Tear the hot inlet:
 

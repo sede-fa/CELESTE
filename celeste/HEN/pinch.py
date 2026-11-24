@@ -149,7 +149,7 @@ class PinchAnalyser:
         is_hot      = out["side"].eq("hot").to_numpy()
         is_cold     = out["side"].eq("cold").to_numpy()
 
-        # ── 6. Per-type validation — always use FULL-DataFrame Series ────────
+        # ── 6. Per-type validation - always use FULL-DataFrame Series ────────
         # Compute missing flags on the FULL frame so shapes match the masks
         sens_fields_missing = out[["T_in", "T_out", "CP"]].isna().any(axis=1).to_numpy()
         bad = out.loc[is_sensible & sens_fields_missing, "segment_id"].tolist()
@@ -221,7 +221,7 @@ class PinchAnalyser:
             seg.loc[self._is_latent,   "T_phase_shift"],
         ]).unique()[::-1]  # unique() returns a numpy array, sorted ascending by default
 
-        # numpy unique sorts ascending — flip to descending
+        # numpy unique sorts ascending - flip to descending
         levels = np.sort(levels)[::-1]
 
         if levels.size < 2:
