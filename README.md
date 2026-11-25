@@ -197,6 +197,10 @@ More complete, runnable scripts are in [`examples/`](examples):
 | [`03_flash.py`](examples/03_flash.py) | flash drum, adiabatic flash, real-fluid media |
 | [`04_jax.py`](examples/04_jax.py) | batched properties, derivatives, a compiled flowsheet, phase diagrams |
 
+For a short tour of what CELESTE is for and what it can do (workflow, process flow diagram, exergy analysis,
+pinch analysis and heat exchanger network, parameter studies), aimed at users of other modelling tools, see
+[`Tutorial/Showcase.ipynb`](Tutorial/Showcase.ipynb).
+
 The notebook [`Tutorial/Tutorial.ipynb`](Tutorial/Tutorial.ipynb) explains step
 by step how to write your own unit models and how to keep them in your own
 library.
