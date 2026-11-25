@@ -146,3 +146,35 @@ def test_objective_min_units(four_streams):
 def test_objective_is_validated(four_streams):
     with pytest.raises(ValueError, match="objective"):
         HENSynthesiser(four_streams, 20).solve(objective='area')
+
+
+def test_integrated_exergy_efficiency():
+    """Heat recovery in the methanol loop: the balance stays closed and the efficiency rises."""
+    from celeste.CSL.systems.ProcessBoxes import MethanolLoop
+    loop = MethanolLoop('loop', n_feed=100.0, T_reac=523.15, P=50.0, T_cond=313.15, purge=0.02)
+    loop.run_sol()
+    hen = HENSynthesiser(loop.pinch_stream_table(), dt_min=10).solve()
+    base = loop.exergy_summary()
+    s = loop.exergy_summary(hen=hen)
+    ex = loop.hen_exergy(hen)
+    assert s.Q_recovered == pytest.approx(hen.network.Q.sum()) and s.Q_recovered > 0
+    # the balance residual is the data inconsistency of the units (entropy against exergy), unchanged by the network
+    assert s.Ex_balance == pytest.approx(loop.exergy_df().Exbalance_error.sum(), abs=1e-4)
+    assert s.Ex_balance == pytest.approx(base.Ex_balance)
+    assert (ex.Exdest >= 0).all() and (ex.Ex_hot >= ex.Ex_cold).all()
+    assert s.efficiency_no_integration == pytest.approx(base.efficiency)
+    assert s.efficiency > base.efficiency and s.Ex_in < base.Ex_in and s.Exloss < base.Exloss
+    assert s.Exdest == pytest.approx(base.Exdest + ex.attrs['d_dest'])
+    assert s.Ex_product == pytest.approx(base.Ex_product)
+
+
+def test_integrated_exergy_needs_the_streams_of_the_system():
+    from celeste.CSL import media
+    from celeste.CSL.systems import ComponentModels
+    train = ComponentModels.Ncomp('train', media.Air(), n=20.0, P_comp=[3.0, 9.0])
+    train.run_sol()
+    cold = pd.DataFrame([dict(segment_type='sensible', side='cold', T_in=20.0, T_out=110.0, CP=0.8, T_phase=np.nan, Q=np.nan)],
+                        index=['feedwater'])
+    hen = HENSynthesiser(pd.concat([train.pinch_stream_table(min_duty=0.0), cold]), dt_min=10).solve()
+    with pytest.raises(ValueError, match='feedwater'):
+        train.exergy_summary(hen=hen)

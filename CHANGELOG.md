@@ -8,6 +8,7 @@ version may notice.
 
 ### Added
 
+- **Exergy efficiency of the heat-integrated plant**: `exergy_summary(hen=hen)` and `hen_exergy(hen)` take a solved `HENSynthesiser` built from `pinch_stream_table()` and give the balance and efficiency with the recovered heat (heat exergy at the logarithmic mean temperatures, exchanger destruction, replaced heaters and coolers taken out); adds `Q_recovered` and `efficiency_no_integration`; docs/heat_integration.md. `heat_df` no longer fails for units with a heat duty but no `Exth` (the mixer)
 - **`Exdest` from the entropy balance**: `Exdest = T0*Sgen` (Gouy-Stodola) wherever a unit defines `Sgen`; the exergy balance of the unit is `Exdest_balance` and `Exbalance_error = Exdest_balance - Exdest` says how well the exergy and entropy data of its streams agree. The system balance of `exergy_summary` (`Ex_balance`) is therefore a real check. `exergy_df` warns when a unit has a negative destruction (the second law is violated inside the unit: inconsistent property models)
 - **Exergy destruction and exergy loss, separately**: every unit has `Exdest` (exergy destroyed, `T0*Sgen`; this is
   what `Exloss` meant until now) and `Exloss` (exergy that leaves the unit to the environment as heat at T > T0 and
