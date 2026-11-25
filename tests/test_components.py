@@ -51,7 +51,7 @@ def test_heater():
     assert h.Q == pytest.approx(15.5211664, rel=1e-8)            # value of the docstring example
     assert h.Q == pytest.approx(h.F1.n*h.F1.h - h.F0.n*h.F0.h)
     assert h.mass_balance() == pytest.approx(0.0, abs=1e-12)
-    assert h.Sgen > 0 and h.Exloss > 0
+    assert h.Sgen > 0 and h.Exdest > 0
 
 
 def test_mixer_energy_and_mass_balance():
@@ -63,7 +63,7 @@ def test_mixer_energy_and_mass_balance():
     assert sol.success
     assert m.F2.T == pytest.approx(501.638728, abs=1e-5)
     assert m.Q == pytest.approx(0.0, abs=1e-8) and m.mass_balance() == pytest.approx(0.0, abs=1e-10)
-    assert m.Sgen > 0 and m.Exloss > 0
+    assert m.Sgen > 0 and m.Exdest > 0
     m.F1.T = 300.0
     assert m.run_sol().success and m.F2.T == pytest.approx(300.0)     # equal temperatures: explicit result
 
@@ -73,7 +73,7 @@ def test_splitter():
     s.F0.n = 5.0
     s.run_sol()
     assert (s.F1.n, s.F2.n) == pytest.approx((1.5, 3.5))
-    assert s.Exloss == pytest.approx(0.0, abs=1e-12) and s.MBcheck() == pytest.approx(0.0, abs=1e-12)
+    assert s.Exdest == pytest.approx(0.0, abs=1e-12) and s.MBcheck() == pytest.approx(0.0, abs=1e-12)
 
 
 @pytest.mark.parametrize('eff', [1.0, 0.8])
@@ -87,7 +87,7 @@ def test_isentropic_compressor(eff):
         assert c.Sgen == pytest.approx(0.0, abs=1e-12)       # real-gas isentropic outlet: exactly reversible
     else:
         assert c.F1.T == pytest.approx(512.4878351, abs=1e-5) and c.W == pytest.approx(6.321257706, rel=1e-6)
-        assert c.Sgen > 0 and c.Exloss > 0 and 0 < c.Exeff < 1
+        assert c.Sgen > 0 and c.Exdest > 0 and 0 < c.Exeff < 1
 
 
 def test_turbine_delivers_work():
@@ -104,7 +104,7 @@ def test_isothermal_compressor():
     c.F1.P = 5.0
     c.run_sol()
     assert c.F1.T == c.F0.T and c.W == pytest.approx(4.987159283, rel=1e-9) and c.Q == -c.W
-    assert c.Exloss == pytest.approx(0.2*c.W, rel=1e-6)
+    assert c.Exdest == pytest.approx(0.2*c.W, rel=1e-6)
 
 
 def test_pump():
@@ -113,7 +113,7 @@ def test_pump():
     assert sol.success
     assert p.W == pytest.approx(0.0035067845, rel=1e-6) and p.F1.T == pytest.approx(298.19654, abs=1e-4)
     assert p.Q == pytest.approx(0.0, abs=1e-9)
-    assert 0.0 <= p.Exloss <= 1.01*p.W                   # incompressible liquid model: bounded by the pump work
+    assert 0.0 <= p.Exdest <= 1.01*p.W                   # incompressible liquid model: bounded by the pump work
 
 
 def test_valve():
@@ -122,7 +122,7 @@ def test_valve():
     v.F0.T = 500.0
     v.F0.P = 10.0
     v.run_sol()
-    assert v.F1.P == 2.0 and v.F1.T == 500.0 and v.Exloss > 0 and v.Sgen > 0
+    assert v.F1.P == 2.0 and v.F1.T == 500.0 and v.Exdest > 0 and v.Sgen > 0
     assert v.W == 0 and v.Q == 0
 
 
@@ -192,7 +192,8 @@ def test_black_box_separators(syngas_x):
     assert g.F1.n == pytest.approx(0.44500001) and g.W == pytest.approx(1.5333083, rel=1e-6)
     assert g.mass_balance() == pytest.approx(0.0, abs=1e-9) and 0 < g.W
     assert g.energy_balance() == pytest.approx(0.0, abs=1e-12)    # the work is dissipated to the surroundings
-    assert g.Exloss == pytest.approx(0.0, abs=1e-12)                # eff = 1: reversible
+    assert g.Exdest_balance == pytest.approx(0.0, abs=1e-12)        # eff = 1: reversible
+    assert abs(g.Exbalance_error) < 1e-3                            # entropy and exergy data agree to a few W
 
 
 def test_gpu_exergy_destruction_is_T0_times_entropy_generation():
@@ -202,8 +203,8 @@ def test_gpu_exergy_destruction_is_T0_times_entropy_generation():
     g.F0.T = 400.0
     g.F0.P = 5.0
     g.run_sol()
-    assert g.W > g.Wid > 0 and g.Exloss == pytest.approx(g.W - g.Wid)
-    assert g.Exloss == pytest.approx(298.15*g.Sgen, rel=1e-7)
+    assert g.W > g.Wid > 0 and g.Exdest == pytest.approx(g.W - g.Wid)
+    assert g.Exdest == pytest.approx(298.15*g.Sgen, rel=1e-7)
     assert g.energy_balance() == pytest.approx(0.0, abs=1e-12)
 
     g3 = components.GPU_3S('g', media.Fuel_CH4(), sep=np.array([1, 0, 1, 1, -1, 1]))
@@ -238,7 +239,7 @@ def test_heat_exchanger_ntu():
     assert sol.success
     assert (hx.H1.T, hx.C1.T) == pytest.approx((494.251066, 617.096598), abs=1e-4)
     assert hx.Q == pytest.approx(hx.H0.n*(hx.H0.h - hx.H1.h)) == pytest.approx(hx.C0.n*(hx.C1.h - hx.C0.h))
-    assert 0 < hx.epsilon < 1 and hx.Sgen > 0 and hx.Exloss > 0
+    assert 0 < hx.epsilon < 1 and hx.Sgen > 0 and hx.Exdest > 0
     fixed = heat.HexNTU('hx', media.Air(), media.Air(), UA=0.9, HexType='effectiveness')
     fixed.H0.T, fixed.C0.T = 800.0, 300.0
     fixed.run_sol()

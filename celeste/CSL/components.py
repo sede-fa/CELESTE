@@ -16,7 +16,7 @@ class GPUbase(ModelBase):
       Wid*eff when it is recovered; ``eff = 0`` means no work is accounted (W = 0).
     * The work ends up as heat: ``Q_amb`` = ΔH - W is exchanged with the surroundings at T0 so that the
       energy balance closes (``heat_and_work()`` = W + Q_amb). It is not reported as process heat.
-    * ``Exloss`` = exergy in + W - exergy out, ``Sgen`` = ΔS - Q_amb/T0, so Exloss = T0·Sgen.
+    * ``Exdest`` = exergy in + W - exergy out, ``Sgen`` = ΔS - Q_amb/T0, so Exdest = T0·Sgen.
     """
     pfd_kind = 'separation'
 
@@ -45,7 +45,7 @@ class GPUbase(ModelBase):
         return float(self.W + self.Q_amb)
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return sum(f.n*f.Ex for f in self.inlets) + self.W - sum(f.n*f.Ex for f in self.outlets)
 
     @property
@@ -294,7 +294,7 @@ class ASU(ModelBase):
         return self.Q*(1 - (298.15/self.F1.T))
     
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.W + self.Exth
 
     @property
@@ -322,7 +322,7 @@ class Pump(ModelBase):
     With neither ``P_out`` nor ``dP`` the pressure set on ``F1`` is the specification.
 
     Ports: F0 -> F1
-    Properties: W (kJ/s, added), Q (= 0 after run_sol), Exloss, Exeff, Sgen
+    Properties: W (kJ/s, added), Q (= 0 after run_sol), Exdest, Exeff, Sgen
 
     Example:
         pump = components.Pump('pump', media.Fuel_CH4L(), eff=0.75, P_out=30.0)
@@ -380,12 +380,12 @@ class Pump(ModelBase):
         return (self.F0.m*1e-1*(self.F1.P - self.F0.P)/self.F0.Medium.rho)*eff_ratio
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.W 
 
     @property
     def Exeff(self) -> float:
-        return 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.W)
+        return 1 - self.Exdest/(self.F0.n*self.F0.Ex + self.W)
     
     @property
     def Sgen(self) -> float:
@@ -416,7 +416,7 @@ class Valve(ModelBase):
     With neither ``P_out`` nor ``dP`` the pressure set on ``F1`` is the specification.
 
     Ports: F0 -> F1
-    Properties: Exloss, Exeff, Sgen (W = Q = 0)
+    Properties: Exdest, Exeff, Sgen (W = Q = 0)
     """
     _default_state = {'F0': dict(n=1.0, T=298.15, P=3.0), 'F1': dict(n=1.0, T=298.15, P=1.0)}
     W = 0.0
@@ -459,12 +459,12 @@ class Valve(ModelBase):
         return solvers.solve_scalar(self._dh, max(1.0, T0 - 150.0), T0 + 150.0, x0=T0, name=self.name)
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex
 
     @property
     def Exeff(self) -> float:
-        return 1 - self.Exloss/(self.F0.n*self.F0.Ex)
+        return 1 - self.Exdest/(self.F0.n*self.F0.Ex)
 
     @property
     def Sgen(self) -> float:
@@ -548,7 +548,7 @@ class DAC(ModelBase):
         return self.Q*(1 - (298.15/self.F2.T))
     
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.W + self.Exth
 
     @property
@@ -599,7 +599,7 @@ class ChgMedium(ModelBase):
         self.F1.P = self.F0.P
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex
 
     @property

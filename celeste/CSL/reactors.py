@@ -31,7 +31,7 @@ class EquilBase(ModelBase):
 
     Properties:
         Exth:   exergy of the heat duty at the reactor temperature [kJ/s]
-        Exloss: exergy destroyed [kJ/s]
+        Exdest: exergy destroyed [kJ/s]
         Exeff:  exergy efficiency [-]
         Sgen:   entropy generated [kJ/K/s]
     """
@@ -83,18 +83,18 @@ class EquilBase(ModelBase):
         return self.Q*(1 - (298.15/self.F1.T))
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
 
     @property
     def Exeff(self) -> float:
-        return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
+        return 1 - self.Exdest/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
 
     @property
     def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F0.T
 
-    @deprecated('Exth, Exloss and Exeff are properties now and need no update call', removal=None)
+    @deprecated('Exth, Exdest and Exeff are properties now and need no update call', removal=None)
     def ExBs(self) -> None:
         return None
 
@@ -191,18 +191,18 @@ class ExtentReactor(ModelBase):
         return self.Q*(1 - 298.15/self.F1.T) if not (self.Q_spec == 0) else 0.0
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
 
     @property
     def Exeff(self) -> float:
-        return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
+        return 1 - self.Exdest/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))
 
     @property
     def Sgen(self) -> float:
         return self.F1.s*self.F1.n - self.F0.s*self.F0.n - self.Q/self.F1.T
 
-    @deprecated('Exth, Exloss and Exeff are properties now and need no update call', removal=None)
+    @deprecated('Exth, Exdest and Exeff are properties now and need no update call', removal=None)
     def ExBs(self) -> None:
         return None
 
@@ -345,7 +345,7 @@ class MR(ExtentReactor):
 
     Inlet state: set ``reactor.F0.n``, ``.Xi``, ``.T``, ``.P``; stand-alone default 500.15 K and 23 bar.
 
-    Properties: Q, xi (WGS, MSR) [mol/s], Exloss, Exeff, Sgen
+    Properties: Q, xi (WGS, MSR) [mol/s], Exdest, Exeff, Sgen
     """
     reactions = {'WGS': eq.REACTIONS['WGS'], 'MSR': eq.REACTIONS['MSR']}
     _default_state = {'F0': dict(n=1.0, T=500.15, P=23.0)}
@@ -437,7 +437,7 @@ class HB(ExtentReactor):
     Inlet state: set ``reactor.F0.n``, ``.Xi``, ``.T``, ``.P``; stand-alone default
     0.74 H2 / 0.25 N2 / 0.01 NH3 at 673.15 K and 200 bar.
 
-    Properties: Q, xi (mol NH3/s), conversion (of H2), Exloss, Exeff, Sgen
+    Properties: Q, xi (mol NH3/s), conversion (of H2), Exdest, Exeff, Sgen
     """
     reactions = {'NH3': {'H2': -1.5, 'N2': -0.5, 'NH3': 1.0}}
     _default_state = {'F0': dict(n=1.0, Xi=[0.74, 0.25, 0.01], T=673.15, P=200.0)}
@@ -561,7 +561,7 @@ class HB_1D(ModelBase):
 
     Properties:
         profile: DataFrame along the bed (V, xi, T, P, mole fractions)
-        Q (from the outlet enthalpy), Q_wall (integrated wall heat; equal to Q), conversion, Exloss, Sgen
+        Q (from the outlet enthalpy), Q_wall (integrated wall heat; equal to Q), conversion, Exdest, Sgen
     """
     _default_state = HB._default_state
 
@@ -639,7 +639,7 @@ class HB_1D(ModelBase):
         return self.Q*(1 - 298.15/self.T_wall)
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
 
     @property
@@ -669,7 +669,7 @@ class MeOH(ExtentReactor):
     Inlet state: set ``reactor.F0.n``, ``.Xi``, ``.T``, ``.P``; stand-alone default
     0.75 H2 / 0.05 CH4 / 0.1 CO2 / 0.1 CO at 473.15 K and 50 bar.
 
-    Properties: Q, xi, conversion (H2, CO2, carbon), Exloss, Exeff, Sgen
+    Properties: Q, xi, conversion (H2, CO2, carbon), Exdest, Exeff, Sgen
 
     Notes:
         Equilibrium constants: celeste.CSL.equilibrium (NASA Gibbs energies). The kinetic model keeps
