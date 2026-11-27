@@ -202,14 +202,19 @@ class PinchAnalyser:
                             alpha=0.15, label=f"Heat recovery = {self.heat_recovery:.1f}")
         ax.plot(hot.H, hot["T"], color="tab:red", lw=2.2, label="Hot composite")
         ax.plot(cold.H, cold["T"], color="tab:blue", lw=2.2, label="Cold composite")
-        if annotate_utilities:
-            if self.cold_utility > self.tol:
-                ax.axvspan(0.0, cold.H.min(), color="tab:blue", alpha=0.08, label=f"$Q_C$ = {self.cold_utility:.1f}")
-            if self.hot_utility > self.tol:
-                ax.axvspan(hot.H.max(), cold.H.max(), color="tab:red", alpha=0.08, label=f"$Q_H$ = {self.hot_utility:.1f}")
-        if show_pinch:
-            for i, T in enumerate(self.pinch_temps["shifted" if shifted else "hot"]):
-                ax.axhline(T, color="0.35", lw=1.0, ls="--", label="Pinch" if i == 0 else None)
+        if annotate_utilities:                      # shaded strip and double arrow for each utility
+            for Q, H0, H1, T, color, name in ((self.cold_utility, 0.0, cold.H.min(), hot["T"].iloc[0], "tab:blue", "Q_C"),
+                                             (self.hot_utility, hot.H.max(), cold.H.max(), cold["T"].iloc[-1], "tab:red", "Q_H")):
+                if Q > self.tol:
+                    ax.axvspan(H0, H1, color=color, alpha=0.08, label=f"${name}$ = {Q:.1f}")
+                    ax.annotate("", xy=(H0, T), xytext=(H1, T), arrowprops=dict(arrowstyle="<->", color=color, lw=1.4))
+                    ax.text(0.5*(H0 + H1), T, f"${name}$ = {Q:.1f}", color=color, fontsize=8, ha="center", va="bottom")
+        if show_pinch:                              # hot and cold pinch temperatures (one line when shifted)
+            lines = ([("shifted", "0.35", "Pinch")] if shifted else
+                     [("hot", "tab:red", "Hot pinch"), ("cold", "tab:blue", "Cold pinch")])
+            for key, color, label in lines:
+                for i, T in enumerate(self.pinch_temps[key]):
+                    ax.axhline(T, color=color, lw=1.0, ls="--", label=label if i == 0 else None)
         ax.set_xlim(left=0)
         ax.set(xlabel="Cumulative heat load", ylabel="Shifted temperature [°C]" if shifted else "Temperature [°C]",
                title="Composite curves" + (" (shifted)" if shifted else ""))
