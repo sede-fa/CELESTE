@@ -26,7 +26,9 @@ from celeste.HEN import PinchAnalyser
 
 pa = PinchAnalyser(streams, dt_min=10).solve()
 pa.summary()                      # hot_utility, cold_utility, heat_recovery, pinch temperatures
-pa.problem_table, pa.heat_cascade
+pa.problem_table, pa.heat_cascade  # intervals of shifted temperature, net heat surplus at each level
+pa.composite_curves['hot'], pa.composite_curves['cold']   # H, T (also '..._shifted'); cold starts at Q_C
+pa.grand_composite_curve          # H, T_shift, T_hot, T_cold
 pa.plot_summary()                 # composite curves + grand composite curve
 PinchAnalyser.sweep_dt_min(streams)   # targets against dt_min
 ```
@@ -134,3 +136,25 @@ with `pinch_stream_table(min_duty=...)`. `summary()['milp_optimal']` and
   stream are not forced to be exchanged in sequence.
 - Isothermal mixing of split streams; no bypasses.
 - One hot and one cold utility.
+
+## Exergy efficiency of the integrated plant
+
+The units of a system treat their heat as if it left to (or came from) a utility: a cooler's heat is lost
+(`Exloss`), a heater's duty is an exergy input. With a network the recovered heat goes from a hot to a cold stream
+instead. Give the system and its network to the summary:
+
+```python
+streams = plant.pinch_stream_table()
+hen = HENSynthesiser(streams, dt_min=10).solve()
+
+plant.exergy_summary()             # no integration
+plant.exergy_summary(hen=hen)      # integrated: Ex_in, Exloss, Exdest, efficiency, Q_recovered
+plant.hen_exergy(hen)              # one row per process-process exchanger: Ex_hot, Ex_cold, Exdest
+```
+
+For every exchanger of `hen.network` (heat `Q`) the exergy on the hot side is `Q (1 - T0/T_lm,hot)` and on the cold side
+`Q (1 - T0/T_lm,cold)`, with the logarithmic mean temperatures of the stream sections; the exchanger destroys the
+difference. In the balance the heater that is replaced no longer takes `Q`, the cooler no longer rejects its share
+of heat, and the destruction of the cooler and heater that went with the recovered heat disappears; the balance
+`Ex_in = Ex_product + Exloss + Exdest` stays closed. `efficiency_no_integration` is the efficiency of the plant as
+solved. The streams of the network must be heaters of the system (external streams raise an error).

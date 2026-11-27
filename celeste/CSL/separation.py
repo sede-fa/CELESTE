@@ -59,7 +59,7 @@ class Flash(ModelBase):
         beta:   vapour fraction F1.n/F0.n [-]
         K:      equilibrium ratios y_i/x_i
         phase:  'liquid', 'vapour' or 'two-phase'
-        Q:      heat added [kJ/s];  Exth, Exloss, Sgen as for the other units
+        Q:      heat added [kJ/s];  Exth, Exdest, Sgen as for the other units
 
     Notes:
         * The feed is tested for phase stability first; a single-phase feed leaves completely through
@@ -170,7 +170,7 @@ class Flash(ModelBase):
         return self.Q*(1 - 298.15/self.F1.T)
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth
 
     @property

@@ -55,8 +55,8 @@ class RStoic(ModelBase): #base.ModelBase
     
     def ExBs(self):
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
-        self.Exloss = self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
-        self.Exeff = 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.FH0.n*self.FH0.Ex + np.maximum(0, self.Exth)) 
+        self.Exdest_balance = self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.Exth
+        self.Exeff = 1 - self.Exdest/(self.F0.n*self.F0.Ex + self.FH0.n*self.FH0.Ex + np.maximum(0, self.Exth)) 
         
     def f_sol(self, x):
         
@@ -109,7 +109,7 @@ class FT(ModelBase):
         F1.Ex: float - flange F1 exergy flow in [kJ/s]
         F2.Ex: float - flange F2 exergy flow in [kJ/s]
         Exth: thermal exergy of the object in [kJ/s]
-        Exloss: exergy loss in the object in [kJ/s]
+        Exdest: exergy loss in the object in [kJ/s]
         Exeff: exergy efficiency of the object. It goes between 0 and 1 
 
     Methods: 
@@ -195,8 +195,8 @@ class FT(ModelBase):
         
     def ExBs(self)->None:
         self.Exth:float = self.Q*(1 - (298.15/self.F0.T))
-        self.Exloss:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth
-        self.Exeff:float = 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))      
+        self.Exdest_balance:float = self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth
+        self.Exeff:float = 1 - self.Exdest/(self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))      
         
     def run_sol(self):
         return self.Eqs()   
@@ -343,9 +343,9 @@ class Hydrocracker(ModelBase):
     
     def ExBs(self):
         self.Exth = self.Q*(1 - (298.15/self.F0.T))
-        self.Exloss = (self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex 
+        self.Exdest_balance = (self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex 
                         - self.F2.n*self.F2.Ex - self.F3.n*self.F3.Ex - self.F4.n*self.F4.Ex + self.Exth)
-        self.Exeff = 1 - self.Exloss/(self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))        
+        self.Exeff = 1 - self.Exdest/(self.FH0.n*self.FH0.Ex + self.F0.n*self.F0.Ex + np.maximum(0, self.Exth))        
    
     def f_sol(self, x):
         

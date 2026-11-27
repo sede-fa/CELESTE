@@ -32,7 +32,7 @@ def test_methanation_equilibrium():
     x = r.F1.Xi
     assert x[2]*x[0]/(x[3]*x[4]) == pytest.approx(equilibrium.K_WGS(600.0), rel=1e-5)
     assert x[3]*x[0]**3*10.0**2/(x[1]*x[4]) == pytest.approx(equilibrium.K_MSR(600.0), rel=1e-5)
-    assert r.Exloss > 0 and r.Sgen > 0 and 0 < r.Exeff < 1
+    assert r.Exdest > 0 and r.Sgen > 0 and 0 < r.Exeff < 1
     import scipy.optimize as spo
     assert r.run_sol(method=spo.least_squares).cost < 1e-10      # user supplied solver still accepted
     # extents follow from the flows and reproduce the outlet
@@ -122,7 +122,7 @@ def test_haber_bosch_plug_flow_bed():
     cooled = reactors.HB_1D('c', Vol=1.0, UA_V=0.5, T_wall=600.0)
     cooled.run_sol()
     assert cooled.Q == pytest.approx(cooled.Q_wall, rel=1e-6) and cooled.Q < 0 and cooled.F1.T < bed.F1.T
-    assert cooled.Exloss > 0
+    assert cooled.Exdest > 0
 
 
 def _meoh(**kw):
@@ -145,7 +145,7 @@ def test_methanol_reactor(kw, x_ref):
     assert sol.success
     np.testing.assert_allclose(r.F1.Xi, x_ref, atol=5e-5)
     assert_elements_conserved(r); assert_physical(r.F1)
-    assert r.Exloss > 0 and 0 < r.Exeff < 1 and r.Sgen > 0
+    assert r.Exdest > 0 and 0 < r.Exeff < 1 and r.Sgen > 0
     if 'T' in kw:
         assert r.F1.T == kw['T'] and r.Q < 0
     else:
@@ -217,7 +217,7 @@ def test_solid_oxide_cell():
     assert soc.mass_balance() == pytest.approx(0.0, abs=1e-8)
     H = soc.ELEMENTS[1]
     assert soc.F0.n*np.dot(soc.F0.Xi, H) == pytest.approx(soc.F1.n*np.dot(soc.F1.Xi, H), rel=1e-8)
-    assert soc.Exloss > 0 and soc.j == -0.5 and 0 < soc.RC < 1
+    assert soc.Exdest > 0 and soc.j == -0.5 and 0 < soc.RC < 1
     # former keywords still work, with a deprecation warning
     with pytest.warns(DeprecationWarning, match='outlet temperature as T='):
         alt = electrochem.SOC('s', media.Fuel_CH4(), media.Air(), T_soc0=1000.0, T_soc1=1050.0, P_soc=3.0, I=-10.0, Ncells=10)
@@ -328,11 +328,11 @@ def test_soc_heat_loss_and_gouy_stodola():
     lossy.run_sol()
     assert lossy.Q == pytest.approx(soc.Q + 3.0) and lossy.W == pytest.approx(soc.W)
     T0 = 298.15
-    gap, gap_lossy = soc.Exloss - T0*soc.Sgen, lossy.Exloss - T0*lossy.Sgen
-    # Exloss = T0*Sgen up to the mismatch of the tabulated chemical exergies with the NASA data, which
+    gap, gap_lossy = soc.Exdest - T0*soc.Sgen, lossy.Exdest - T0*lossy.Sgen
+    # Exdest = T0*Sgen up to the mismatch of the tabulated chemical exergies with the NASA data, which
     # depends on the extents only (docs/known_issues.md)
     assert gap_lossy == pytest.approx(gap, abs=1e-10) and abs(gap) < 1e-3*soc.W
-    assert lossy.Exloss > soc.Exloss
+    assert lossy.Exdest > soc.Exdest
 
 
 def test_alkaline_electrolyser():
@@ -387,7 +387,7 @@ def test_pcc_balances_and_voltage_models(I):
     assert pcc.energy_balance() == pytest.approx(0.0, abs=1e-10)
     x = dict(zip(pcc.F1.Medium.species, pcc.F1.Xi))
     assert x['CO2']*x['H2']/(x['CO']*x['H2O']) == pytest.approx(pcc.K_WGS(), rel=1e-8)
-    assert pcc.Exloss > 0 and pcc.Sgen > 0
+    assert pcc.Exdest > 0 and pcc.Sgen > 0
     # the air side forms water per proton from a quarter oxygen
     assert pcc.A1.n*pcc.A1.Xi[2] - pcc.A0.n*pcc.A0.Xi[2] == pytest.approx(0.5*pcc.n_H)
     assert pcc.A0.n*pcc.A0.Xi[0] - pcc.A1.n*pcc.A1.Xi[0] == pytest.approx(0.25*pcc.n_H)

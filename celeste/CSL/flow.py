@@ -70,7 +70,7 @@ class Splitter(ModelBase):
         self.F2.n = (1-self.split)*self.F0.n
     
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F2.n*self.F2.Ex - self.F1.n*self.F1.Ex 
     
     @property
@@ -111,7 +111,7 @@ class Mixer(ModelBase):
         return self.F2.h*self.F2.n - (self.F1.h*self.F1.n + self.F0.h*self.F0.n)
 
     @property  
-    def Exloss(self):
+    def Exdest_balance(self):
         return (self.F0.n*self.F0.Ex + self.F1.n*self.F1.Ex) - self.F2.n*self.F2.Ex 
     
     @property

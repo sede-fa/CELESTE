@@ -211,7 +211,7 @@ class Compressor(_RealGasPath, ModelBase):
 
     Properties:
         W: shaft work [kJ/s]
-        Exloss: exergy destruction [kJ/s], Sgen: entropy generation [kJ/K/s], Exeff: exergy efficiency
+        Exdest: exergy destruction [kJ/s], Sgen: entropy generation [kJ/K/s], Exeff: exergy efficiency
     """
     _default_state = {'F0': dict(n=1.0, T=298.15, P=1.0), 'F1': dict(n=1.0, T=398.15, P=3.0)}
 
@@ -230,12 +230,12 @@ class Compressor(_RealGasPath, ModelBase):
         self._init_state(legacy)
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex + self.W
 
     @property
     def Exeff(self) -> float:
-        return 1 - self.Exloss/(self.F0.n*self.F0.Ex + self.W)
+        return 1 - self.Exdest/(self.F0.n*self.F0.Ex + self.W)
 
     @property
     def Sgen(self) -> float:
@@ -316,8 +316,8 @@ class CompIsot(Compressor):
         return self.Q*(1 - 298.15/self.F0.T)
 
     @property
-    def Exloss(self) -> float:
-        return super().Exloss + self.Exth
+    def Exdest_balance(self) -> float:
+        return super().Exdest_balance + self.Exth
 
     @property
     def Sgen(self) -> float:

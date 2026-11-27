@@ -38,7 +38,7 @@ sol = letdown.run_sol()
 print(f'\nadiabatic let-down from 30 to 1.2 bar: feed is {letdown.F0.Medium.state}, '
       f'drum at {letdown.T:.1f} K, {100*letdown.beta:.1f} % vapour (converged: {sol.success})')
 print(f'methanol in vapour {letdown.F1.Xi[6]:.3f}, in liquid {letdown.F2.Xi[6]:.3f}; '
-      f'exergy destroyed {letdown.Exloss:.2f} kW\n')
+      f'exergy destroyed {letdown.Exdest:.2f} kW\n')
 
 # --- 3. real-fluid media make any unit phase-aware -----------------------------------------------------
 cooler = heat.Heater('cooler', media.Fuel_CH4_PR(), media.Fuel_CH4_PR())

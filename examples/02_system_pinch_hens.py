@@ -47,4 +47,7 @@ print('utility exchangers\n', hen.utilities.round(2), '\n')
 print(hen.check())
 fig, _ = hen.plot_grid_diagram()
 fig.savefig(FIG_DIR / 'network.png', dpi=120)
+
+# --- 4. exergy efficiency with and without the network ------------------------------------------------
+print(loop.exergy_summary(hen=hen).round(3))
 print(f'\nfigures written to {FIG_DIR}')

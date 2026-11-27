@@ -8,6 +8,18 @@ version may notice.
 
 ### Added
 
+- **`PinchAnalyser` rewritten around one function** (the heat of the segments above or below a temperature): about
+  260 instead of 660 lines; the problem table, cascade, composite curves and grand composite curve all follow from it.
+  The grand composite curve is drawn with straight lines between the temperature levels (it was a step plot), latent
+  segments as flat pieces
+- **Exergy efficiency of the heat-integrated plant**: `exergy_summary(hen=hen)` and `hen_exergy(hen)` take a solved `HENSynthesiser` built from `pinch_stream_table()` and give the balance and efficiency with the recovered heat (heat exergy at the logarithmic mean temperatures, exchanger destruction, replaced heaters and coolers taken out); adds `Q_recovered` and `efficiency_no_integration`; docs/heat_integration.md. `heat_df` no longer fails for units with a heat duty but no `Exth` (the mixer)
+- **`Exdest` from the entropy balance**: `Exdest = T0*Sgen` (Gouy-Stodola) wherever a unit defines `Sgen`; the exergy balance of the unit is `Exdest_balance` and `Exbalance_error = Exdest_balance - Exdest` says how well the exergy and entropy data of its streams agree. The system balance of `exergy_summary` (`Ex_balance`) is therefore a real check. `exergy_df` warns when a unit has a negative destruction (the second law is violated inside the unit: inconsistent property models)
+- **Exergy destruction and exergy loss, separately**: every unit has `Exdest` (exergy destroyed, `T0*Sgen`; this is
+  what `Exloss` meant until now) and `Exloss` (exergy that leaves the unit to the environment as heat at T > T0 and
+  is not used, `max(0, -Exth)`: a cooler, a cooled reactor or compressor, the stack heat). System level:
+  `exergy_df()` (both per unit, plus `Exbalance_error`), `tot_Exdest()`, `tot_Exloss()`, and `exergy_summary(products=None)` with
+  `Ex_in = Ex_product + Ex_unused + Exloss + Exdest` (the remainder is checked), `efficiency`, `efficiency_max`
+  (every irreversibility removed) and `destruction_share`; docs/conventions.md
 - **`SysBase.pfd()`**: interactive process flow diagram (layered layout, orthogonal streams, recycles dashed;
   stream state and composition and unit duties on hover) as one self-contained HTML file. The drawing is the
   framework-independent package `celeste.pfd` (`draw`, `UnitView`, `StreamView`, `Terminal`); units and flanges say
@@ -205,7 +217,11 @@ version may notice.
 
 | What | Before | Now | Size of the effect |
 |---|---|---|---|
+| `PinchAnalyser` composite curves | each curve started at the lowest temperature of *all* streams, so a curve whose streams start higher had a wrong first segment (methanol loop: cold curve from 30 instead of 40 °C) | each curve spans the temperatures of its own streams | plots only; `composite_curves` keys are now `hot`, `cold`, `hot_shifted`, `cold_shifted` (cold curves start at Q_C) |
+| `PinchAnalyser` with latent segments | latent heat was booked in the temperature interval above its level, so a condensing stream could heat a colder stream, and Q_H - Q_C did not always equal the stream balance (30 of 200 random cases) | latent heat at its level; targets equal those of a stream with a vanishing temperature glide | random cases: Q_H off by up to 295 kW before; sensible-only problems unchanged |
 | `CompIsent` outlet state | ideal-gas formula with the mean heat capacity of inlet and outlet, solved with `root` | real-gas isentropic outlet from the medium, then the efficiency correction (also used by the mapped compressors and turbines); explicit, so `run_sol` returns a result with `success=True` and `get_success()` no longer lists compressors | outlet temperature 511.43 → 512.49 K and work 6.290 → 6.321 kJ/s for air, 300 K, 1 → 5 bar, eff 0.8; the reversible case now has Sgen = 0 exactly (was 1e-4) |
+| `unit.Exdest` | exergy balance of the unit | `T0*Sgen` (the old value is `Exdest_balance`) | below 0.4 % for reacting units (known data gap), exact for heat exchangers, mixers and compressors; the flash of the methanol loop with NASA media gives a negative value (-19.6 against -18.8 kW) because its phase split (Peng-Robinson) and its stream properties (NASA) are not consistent |
+| `unit.Exloss`, `tot_Exloss()` | exergy destroyed | exergy lost to the environment as heat; the exergy destroyed is `Exdest`, `tot_Exdest()` | every use of `Exloss` as the destruction must read `Exdest`; `exdest_df` is unchanged |
 | `GPU_*` `Exloss`, `Sgen` | exergy in - exergy out (negative for a separation), ΔS | exergy in + W - exergy out = W - Wid ≥ 0; ΔS - Q_amb/T0, so Exloss = T0·Sgen | GPU rows of `exdest_df` grow by the separation work, e.g. 0.94 kW in `SOECSys` |
 | `SysBase.MBcheck()`, `EBcheck()` | sources and sinks only, `MBcheck` out - in; `EBcheck` from the heater / heat / work tables | boundary streams from the recorded connections, in - out; Σ(Q + W) of every unit | sign of `MBcheck`; `EBcheck` now closes for boxes without sources and sinks (e.g. `SOCsysRecupe`, `CO2Sys`) |
 | `Valve` outlet temperature | equal to the inlet | isenthalpic | none for ideal-gas media; Joule-Thomson cooling for `*_PR` media |
@@ -240,6 +256,7 @@ These keep working and emit a `CelesteDeprecationWarning`:
 
 | Name | Use instead |
 |---|---|
+| `get_Exloss()`, `exloss_df()` | `get_Exdest()`, `exergy_df()` (gives `Exdest` and `Exloss`) |
 | `SysBase.connect(pin1, pin2)` | `link(pin1, pin2)`; `eo_compile()` / `eo_sol()` build the connection equations |
 | `PCC_base`, `SOC_Nernst_avg` (no warning) | `PCC`, `SOC(..., V_model='average')` |
 | `PCC(Tpcc0=, Tpcc1=, extent=)` | `pcc.F0.T = ...`, `PCC(..., T=...)`, nothing |

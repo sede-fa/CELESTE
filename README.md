@@ -28,7 +28,7 @@ reactor.run_sol()
 
 reactor.F1.Xi      # outlet composition at chemical equilibrium
 reactor.Q          # heat duty, kW
-reactor.Exloss     # exergy destroyed, kW
+reactor.Exdest     # exergy destroyed, kW
 ```
 
 ## Core ideas
@@ -44,7 +44,7 @@ reactor.Exloss     # exergy destroyed, kW
 - **Systems are classes.** A system derives from `SysBase`, creates its units
   and connects them in flow order in `seq_sol`. Recycles are converged with
   `Recycle_Tear`. A system can be used inside another system like a unit.
-- **Every balance is checked.** Units report `Q`, `W`, `Exloss` and `Sgen`;
+- **Every balance is checked.** Units report `Q`, `W`, `Exdest` and `Sgen`;
   systems check mass and energy balances over their boundary and break the
   exergy destruction down by unit type.
 - **One property kernel for NumPy and JAX.** The same code serves the unit
@@ -139,6 +139,8 @@ plant.solve_specs()
 plant.work_df()            # work of every unit
 plant.heater_df()          # heaters and coolers
 plant.exdest_df()          # exergy destruction by unit type
+plant.exergy_df()          # exergy destroyed (`Exdest`) and lost to the environment (`Exloss`) per unit
+plant.exergy_summary()     # balance, efficiency and the efficiency without irreversibilities
 plant.MBcheck(), plant.EBcheck()                 # overall mass and energy balance
 print(plant.create_graph('mermaid', save=False)) # flowsheet as a Mermaid graph
 ```
@@ -194,6 +196,10 @@ More complete, runnable scripts are in [`examples/`](examples):
 | [`02_system_pinch_hens.py`](examples/02_system_pinch_hens.py) | methanol loop with recycle → stream table → pinch analysis → heat exchanger network |
 | [`03_flash.py`](examples/03_flash.py) | flash drum, adiabatic flash, real-fluid media |
 | [`04_jax.py`](examples/04_jax.py) | batched properties, derivatives, a compiled flowsheet, phase diagrams |
+
+For a short tour of what CELESTE is for and what it can do (workflow, process flow diagram, exergy analysis,
+pinch analysis and heat exchanger network, parameter studies), aimed at users of other modelling tools, see
+[`Tutorial/Showcase.ipynb`](Tutorial/Showcase.ipynb).
 
 The notebook [`Tutorial/Tutorial.ipynb`](Tutorial/Tutorial.ipynb) explains step
 by step how to write your own unit models and how to keep them in your own
@@ -268,7 +274,7 @@ documentation.
   writing a unit model: port names, sign conventions, design inputs versus
   flange state, how to solve, how to test.
 - **Tests.** Every model needs tests for its mass, element and energy balances
-  and the second law (`Exloss = T0·Sgen` where the exergy model allows it),
+  and the second law (`Exdest = T0·Sgen` where the exergy model allows it),
   plus reference values where data exist.
 - **Results that change.** A change that alters numbers must be listed in
   `CHANGELOG.md` under *Results that change*, with the size of the effect.

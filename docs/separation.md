@@ -34,7 +34,7 @@ After `run_sol()`:
 | `K` | equilibrium ratios y/x |
 | `recovery` | fraction of every component that leaves with the liquid |
 | `F1`, `F2` | outlet flanges; an outlet without flow has `n = 0` |
-| `Q`, `Exth`, `Exloss`, `Sgen` | as for the other units |
+| `Q`, `Exth`, `Exdest`, `Sgen` | as for the other units |
 
 In a system the drum is used like any other unit:
 

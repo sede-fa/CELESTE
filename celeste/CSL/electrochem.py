@@ -222,7 +222,7 @@ class _FuelStack(ModelBase):
         return self.Q*(1 - (T0/self.F1.T))
 
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.Ex*self.F0.n + self.A0.Ex*self.A0.n - self.F1.Ex*self.F1.n - self.A1.Ex*self.A1.n + self.W + self.Exth
 
     @property
@@ -598,12 +598,12 @@ class AEL(ModelBase):
         return self.Q*(1 - 298.15/self.F1.T)
     
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Exth + self.W
     
     @property
     def Exeff(self) -> float:
-        return 1 - self.Exloss/(self.F0.n*self.F0.Ex + np.max([0, self.Exth]) +  self.W)
+        return 1 - self.Exdest/(self.F0.n*self.F0.Ex + np.max([0, self.Exth]) +  self.W)
         
     def f_sol(self, x: Array) -> Array:
         self.j = x[0]

@@ -27,7 +27,7 @@ def test_knock_out_drum_with_nasa_media(syngas_x):
     assert ko.recovery[4] == pytest.approx(0.9906, abs=1e-3) and ko.recovery[0] < 1e-4
     assert ko.Q < 0                                         # heat of condensation leaves the drum
     assert ko.T == 303.15 and ko.P == 20.0 and ko.K[0] > 1e3 > 1 > ko.K[4]
-    assert np.isfinite([ko.Exloss, ko.Sgen, ko.Exth]).all()
+    assert np.isfinite([ko.Exdest, ko.Sgen, ko.Exth]).all()
 
 
 def test_single_phase_feed_leaves_through_one_outlet(syngas_x):
@@ -85,8 +85,8 @@ def test_adiabatic_flash_of_a_real_fluid():
     assert fl.T == pytest.approx(349.59, abs=0.05) and fl.beta == pytest.approx(0.1987, abs=1e-3)
     assert fl.F1.Xi[6] > fl.F0.Xi[6] > fl.F2.Xi[6]                # methanol enriches in the vapour
     assert fl.mass_balance() == pytest.approx(0.0, abs=1e-9)
-    assert fl.Sgen > 0 and fl.Exloss > 0                          # throttling is irreversible
-    assert fl.Exloss == pytest.approx(298.15*fl.Sgen, rel=1e-6)   # Gouy-Stodola, exergy and entropy are consistent
+    assert fl.Sgen > 0 and fl.Exdest > 0                          # throttling is irreversible
+    assert fl.Exdest == pytest.approx(298.15*fl.Sgen, rel=1e-6)   # Gouy-Stodola, exergy and entropy are consistent
     for el in 'CHO':
         assert element_flow(fl.F0, el) == pytest.approx(element_flow(fl.F1, el) + element_flow(fl.F2, el), rel=1e-9)
     assert fl.F1.Medium.phase == 'vapour' and fl.F2.Medium.phase == 'liquid'
@@ -128,7 +128,7 @@ def test_real_fluid_medium_handles_phase_change(syngas_x):
     dry.F1.P = 20.0
     dry.run_sol()
     assert cooler.Q < dry.Q - 70.0                                 # the latent heat is part of the duty
-    assert cooler.Exloss > 0
+    assert cooler.Exdest > 0
 
 
 def test_real_fluid_medium_api():
