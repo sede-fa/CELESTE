@@ -114,7 +114,7 @@ def test_ft_reactor_and_separation():
     assert r.Q == pytest.approx(-32.643397, rel=1e-6)          # F2 is liquid (was evaluated as gas: -32.627621)
     assert r.F0.m == pytest.approx(r.F1.m + r.F2.m, rel=1e-5)
     r.ExBs()
-    assert r.Exloss > 0 and 0 < r.Exeff < 1
+    assert r.Exdest > 0 and 0 < r.Exeff < 1
     g = componentsFT.GPU_2S('g', mediaFT.Syncrude())
     g.F0.Xi = r.F1.Xi
     g.run_sol()
@@ -125,7 +125,7 @@ def test_ft_units_run():
     h = reactorsFT.Hydrocracker('h', mediaFT.Wax())
     assert h.run_sol().success and h.mass_balance() == pytest.approx(0.0, abs=1e-6)
     h.ExBs()
-    assert np.isfinite(h.Exloss)
+    assert np.isfinite(h.Exdest)
     c = componentsFT.CompIsent('c', mediaFT.LightGas(), eff=0.8)
     assert c.run_sol().success and c.F1.T == pytest.approx(350.9861, abs=1e-3)
     m = flowFT.Mixer('m', mediaFT.LightGas())
@@ -221,7 +221,7 @@ def test_rstoic_heat_duty_is_the_enthalpy_balance():
     assert r.Q == pytest.approx(r.F1.n*r.F1.h - r.F0.n*r.F0.h - r.FH0.n*r.FH0.h, abs=1e-12)
     assert r.Q == pytest.approx(3.732064, rel=1e-5)                          # endothermic steam reforming
     r.ExBs()
-    assert r.Exloss > 0 and 0 < r.Exeff < 1
+    assert r.Exdest > 0 and 0 < r.Exeff < 1
 
 
 @pytest.fixture
@@ -266,7 +266,7 @@ def test_raoult_flash(ft_effluent):
     assert d.F1.Xi[w]*20.0 == pytest.approx(psat[w], rel=1e-8)
     assert d.F2.phase == 'Liquid' and d.F1.phase == 'Gas'
     # second law; not exactly T0*Sgen because the wet feed condenses at the dead state (exergy reference)
-    assert d.Sgen > 0 and d.Exloss == pytest.approx(298.15*d.Sgen, rel=1e-3)
+    assert d.Sgen > 0 and d.Exdest == pytest.approx(298.15*d.Sgen, rel=1e-3)
 
 
 def test_raoult_flash_above_the_dew_point_and_adiabatic(ft_effluent):

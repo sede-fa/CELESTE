@@ -40,7 +40,7 @@ class ModelBase(Base):
       inlet (``F0``, ``A0``, ``H0``, ``C0``, ``FH0``), every other port is an outlet
     * ``run_sol()`` brings the outlets in line with the inlets and parameters
     * ``Q`` / ``W`` are heat and work added to the unit in kJ/s (kW)
-    * ``Exloss`` is the exergy destroyed in kJ/s, ``Sgen`` the entropy generated in kJ/K/s
+    * ``Exdest`` is the exergy destroyed in kJ/s, ``Sgen`` the entropy generated in kJ/K/s
     '''
 
     #: kind of box in the process flow diagram (a key of ``celeste.pfd.KINDS``); None: from the module of the class
@@ -56,7 +56,7 @@ class ModelBase(Base):
         Unit families add their own rows: ``return super().pfd_view().add('PR', self.F1.P/self.F0.P)``.
         """
         view = UnitView(self.pfd_kind or _kind_from_class(type(self)))
-        view.add('Q', safe(self, 'Q'), 'kW').add('W', safe(self, 'W'), 'kW').add('Ex loss', safe(self, 'Exloss'), 'kW')
+        view.add('Q', safe(self, 'Q'), 'kW').add('W', safe(self, 'W'), 'kW').add('Ex destroyed', safe(self, 'Exdest'), 'kW').add('Ex lost', safe(self, 'Exloss'), 'kW')
         sol = self.__dict__.get('_sol')
         if sol is not None and hasattr(sol, 'success'):
             view.add('converged', bool(sol.success))
@@ -69,13 +69,47 @@ class ModelBase(Base):
         return []
 
     @property
-    def Exloss(self):
-        """Exergy destruction in kJ/s. Units override this; models that still assign it in ``ExBs()`` may do so."""
-        return self.__dict__.get('_Exloss_value', 0)
+    def Exdest(self) -> float:
+        """
+        Exergy destroyed inside the unit in kJ/s, from its entropy balance (Gouy-Stodola): ``T0*Sgen``.
+        A unit without an entropy balance (no ``Sgen``) reports ``Exdest_balance``. The difference to the
+        exergy balance of the unit is ``Exbalance_error``.
+        """
+        try:
+            sgen = float(self.Sgen)
+        except (AttributeError, TypeError, ValueError):
+            sgen = np.nan
+        from .exergy import T0
+        return T0*sgen if np.isfinite(sgen) else float(self.Exdest_balance)
 
-    @Exloss.setter
-    def Exloss(self, value):
-        self.__dict__['_Exloss_value'] = value
+    @property
+    def Exdest_balance(self):
+        """
+        Exergy destroyed from the exergy balance of the unit in kJ/s: exergy in + W + heat exergy - exergy out.
+        Units override this; models that still assign it in ``ExBs()`` may do so.
+        """
+        return self.__dict__.get('_Exdest_value', 0)
+
+    @Exdest_balance.setter
+    def Exdest_balance(self, value):
+        self.__dict__['_Exdest_value'] = value
+
+    @property
+    def Exbalance_error(self) -> float:
+        """Exergy balance minus entropy balance, ``Exdest_balance - T0*Sgen`` in kJ/s: zero if the property models agree."""
+        return float(self.Exdest_balance) - self.Exdest
+
+    @property
+    def Exloss(self):
+        """
+        Exergy that leaves the unit to the environment as heat and is not used by the process, in kJ/s (>= 0).
+
+        Heat that leaves the unit at T > T0 carries ``Q*(1 - T0/T)`` (``Exth``, negative for heat removed). It is
+        counted as lost here: a cooler, a cooled reactor or compressor rejects it. Exergy that is destroyed
+        is ``Exdest``; ``Exdest + Exloss`` together are what the unit takes away from the useful exergy.
+        Units without a heat duty have none.
+        """
+        return max(0., -float(self.Exth)) if hasattr(self, 'Exth') else 0.
 
     @staticmethod
     def ViewFlange(flanges):

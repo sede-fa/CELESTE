@@ -158,7 +158,7 @@ class GPU_2S(comp.GPUbase):
         return float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
     
     @property
-    def Exloss(self):
+    def Exdest_balance(self):
         return self.W - self.Wid
         
     def run_sol(self):
@@ -232,7 +232,7 @@ class GPU_2SV2(comp.GPUbase):
         return float(np.where(self.Wid > 0, self.Wid/self.eff, self.Wid*self.eff))
     
     @property
-    def Exloss(self):
+    def Exdest_balance(self):
         return self.W - self.Wid
       
     def run_sol(self):
@@ -382,7 +382,7 @@ class CompIsent(turbomachinery.CompIsent):
         m1: flange F1 mass flow in [g/s]
         F0.Ex: float - inlet exergy flow in [kJ/s]
         F1.Ex: float - flange F1 exergy flow in [kJ/s]
-        Exloss: exergy loss in the object [kJ/s]
+        Exdest: exergy loss in the object [kJ/s]
         Exeff: exergy efficiency of the object. It goes between 0 and 1 
 
     Methods: 
@@ -427,7 +427,7 @@ class Flash(ModelBase):
         P:      drum pressure [bar]; otherwise the feed pressure minus ``dP``
 
     Ports: F0 (feed) -> F1 (vapour, phase 'Gas'), F2 (liquid: hydrocarbons + water, phase 'Liquid')
-    Properties: beta (vapour fraction), water_liquid (mol/s of liquid water), Q, Exloss, Sgen
+    Properties: beta (vapour fraction), water_liquid (mol/s of liquid water), Q, Exdest, Sgen
 
     Example:
         drum = componentsFT.Flash('drum', mediaFT.Syncrude(), T=310.0, P=20.0)
@@ -471,7 +471,7 @@ class Flash(ModelBase):
         return self.F1.n*self.F1.h + self.F2.n*self.F2.h - self.F0.n*self.F0.h
 
     @property
-    def Exloss(self):
+    def Exdest_balance(self):
         from ..CSL.exergy import T0
         return self.F0.n*self.F0.Ex - self.F1.n*self.F1.Ex - self.F2.n*self.F2.Ex + self.Q*(1 - T0/self.F1.T)
 

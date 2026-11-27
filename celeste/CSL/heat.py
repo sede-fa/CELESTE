@@ -127,7 +127,7 @@ class HexBase(ModelBase):
         return -1.
     
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.H0.n*(self.H0.Ex - self.H1.Ex) + self.C0.n*(self.C0.Ex - self.C1.Ex)
     
     @property
@@ -354,7 +354,7 @@ class Heater(ModelBase):
         return th
     
     @property
-    def Exloss(self) -> float:
+    def Exdest_balance(self) -> float:
         return self.F0.Ex*self.F0.n - self.F1.Ex*self.F1.n + self.Exth
     
     @property

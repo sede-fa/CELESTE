@@ -27,7 +27,7 @@ def train():
 
 def test_compression_train(train):
     assert (train.F1.T, train.F1.P) == (350.0, 3.0)
-    assert train.tot_Exloss() == pytest.approx(1.9776524, rel=1e-6)
+    assert train.tot_Exdest() == pytest.approx(1.9776524, rel=1e-6)
     assert train.r_get() == ['HT1', 'HT2', 'comp1', 'comp2']
     assert train.get_success() == {}                  # the compressors are explicit: nothing to converge
     report = train.performance_report()
@@ -51,11 +51,40 @@ def test_reports(train):
     assert train.tot_heaters_out() == pytest.approx(heaters.Q.sum()) and train.tot_heaters_in() == 0
     assert train.tot_Qloss() == 0
     ex = train.exdest_df()
-    assert ex.loc['Total', 'Ex. destruction / kW'] == pytest.approx(train.tot_Exloss())
+    assert ex.loc['Total', 'Ex. destruction / kW'] == pytest.approx(train.tot_Exdest())
     assert ex.loc[['Compressors', 'Coolers'], '%'].sum() == pytest.approx(100.0)
-    assert train.exloss_df().shape == (4, 1) and train.SBcheck().shape == (4, 2)
+    assert train.exergy_df().shape == (4, 3) and train.SBcheck().shape == (4, 2)
     assert train.ViewAllFlange().shape[1] == 8
     assert train.tot_exth_out() < 0
+
+
+def test_exergy_destruction_and_loss(train):
+    """Exdest is the irreversibility (T0*Sgen); Exloss the exergy of rejected heat; both are 0 for units without heat."""
+    from celeste.CSL.exergy import T0
+    ex = train.exergy_df()
+    assert list(ex.columns) == ['Exdest', 'Exloss', 'Exbalance_error']
+    for name, unit in train.get_Exdest().items():
+        assert unit.Exdest == pytest.approx(T0*unit.Sgen)                 # Gouy-Stodola
+        assert unit.Exdest_balance - unit.Exdest == pytest.approx(unit.Exbalance_error)
+        assert abs(unit.Exbalance_error) < 5e-3*abs(unit.Exdest) + 1e-6   # exergy balance agrees
+        assert unit.Exloss >= 0
+    coolers = [u for u in train.get_Exdest().values() if hasattr(u, 'Exth')]
+    assert all(c.Exloss == pytest.approx(max(0, -c.Exth)) for c in coolers)
+    assert train.tot_Exloss() == pytest.approx(ex.Exloss.sum()) and train.tot_Exloss() > 0
+    with pytest.warns(DeprecationWarning, match='get_Exdest'):
+        assert train.get_Exloss().keys() == train.get_Exdest().keys()
+    with pytest.warns(DeprecationWarning, match='exergy_df'):
+        assert train.exloss_df().equals(train.exergy_df())
+
+
+def test_exergy_summary_closes(train):
+    s = train.exergy_summary()
+    assert s.Ex_balance == pytest.approx(train.exergy_df().Exbalance_error.sum(), abs=1e-6)   # data consistency
+    assert abs(s.Ex_balance) < 1e-3*s.Ex_in
+    assert s.Exdest == pytest.approx(train.tot_Exdest()) and s.Exloss == pytest.approx(train.tot_Exloss())
+    assert 0 < s.efficiency < s.efficiency_max <= 1
+    assert s.efficiency_max == pytest.approx(1 - s.Exloss/s.Ex_in - s.Ex_unused/s.Ex_in)
+    assert s.destruction_share == pytest.approx(s.Exdest/s.Ex_in)
 
 
 def test_pinch_stream_table(train):
@@ -91,7 +120,7 @@ def test_soec_boxes(cls):
     assert box.soc._sol.success
     assert box.soc.Vop == pytest.approx(1.22128, abs=1e-4)
     assert box.F2.n > 0 and box.A2.T == 298.15
-    assert np.isfinite(box.tot_Exloss()) and not box.exdest_df().isna().any().any()
+    assert np.isfinite(box.tot_Exdest()) and not box.exdest_df().isna().any().any()
     if hasattr(box, 'WWater'):
         assert box.WWater.Xi == pytest.approx([1.0]) and box.WWater.n > 0
 
@@ -100,7 +129,7 @@ def test_ael_box():
     box = ElectBox.AELSys('box', n=1.0, Sep=np.array([0, 1, 0, -1]))
     box.run_sol()
     assert box.ael._sol.success and box.ael.W == pytest.approx(373.32639, rel=1e-6)
-    assert box.F2.n > 0 and np.isfinite(box.tot_Exloss())
+    assert box.F2.n > 0 and np.isfinite(box.tot_Exdest())
 
 
 def test_soc_example_systems():
@@ -214,7 +243,7 @@ def test_soc_heat_loss_follows_the_sign_convention():
     assert lossy.soc.Q == pytest.approx(ref.soc.Q + 5.0, rel=1e-9)
     assert lossy.EBcheck() == pytest.approx(0.0, abs=1e-9)
     # the loss leaves at T0: no exergy with it, so it shows up as destruction and as entropy generation
-    assert lossy.soc.Exloss - 298.15*lossy.soc.Sgen == pytest.approx(ref.soc.Exloss - 298.15*ref.soc.Sgen, abs=1e-9)
+    assert lossy.soc.Exdest - 298.15*lossy.soc.Sgen == pytest.approx(ref.soc.Exdest - 298.15*ref.soc.Sgen, abs=1e-9)
 
 
 def test_compression_train_with_other_compressors_and_pressure_ratio():
@@ -386,7 +415,7 @@ def test_pfd(tmp_path):
     tips = json.loads(re.search(r'const TIPS = (\{.*?\});\n', page).group(1))
     stream = next(v for v in tips.values() if 'split.F1' in v and 'mix.F1' in v)
     assert 'mole fractions' in stream and 'CH3OH' in stream
-    assert any('Ex loss' in v and 'MeOH' in v for v in tips.values())
+    assert any('Ex destroyed' in v and 'MeOH' in v for v in tips.values())
     assert '<iframe srcdoc=' in drawn._repr_html_()
     soc = SOCsystem.SOCsysRecupe('s', I=-50.0)           # declared: drawn without solving
     assert '2 back stream' in soc.pfd().html
@@ -505,3 +534,14 @@ def test_pfd_views():
     t = tips(pfd.html)
     assert any('size' in v for v in t.values()) and any('water' in v for v in t.values())
     assert '3 units, 4 streams; 1 back stream' in pfd.html
+
+
+def test_negative_destruction_is_reported():
+    """A flash with NASA media splits by Peng-Robinson: the drum of the methanol loop violates the second law."""
+    from celeste.CSL.systems.ProcessBoxes import MethanolLoop
+    loop = MethanolLoop('loop', n_feed=100.0, T_reac=523.15, P=50.0, T_cond=313.15, purge=0.02)
+    loop.run_sol()
+    with pytest.warns(UserWarning, match='negative exergy destruction'):
+        df = loop.exergy_df()
+    assert df.loc['loop.cond.drum', 'Exdest'] < 0 and abs(df.loc['loop.cond.drum', 'Exbalance_error']) > 0
+    assert df.loc[['loop.cond.cooler', 'loop.preheat'], 'Exbalance_error'].abs().max() < 1e-3

@@ -14,7 +14,8 @@ them too; existing user models are not affected by any of this.
 | mole / mass fractions | `Xi` / `Yi` | - |
 | enthalpy, Gibbs energy, exergy, LHV | `h`, `g`, `Ex`, `LHV` | kJ/mol |
 | entropy, heat capacity | `s`, `cp` | kJ/mol/K |
-| heat, work, exergy loss | `Q`, `W`, `Exloss` | kJ/s (kW) |
+| heat, work | `Q`, `W` | kJ/s (kW) |
+| exergy destroyed, exergy lost to the environment | `Exdest`, `Exloss` | kJ/s (kW) |
 | entropy generation | `Sgen` | kJ/K/s |
 
 `Q` and `W` are positive when they **enter** the unit. Enthalpies include the
@@ -83,7 +84,7 @@ class MyUnit(ModelBase):
     @property
     def Q(self): ...          # derived quantities are properties, not attributes set by a method
     @property
-    def Exloss(self): ...
+    def Exdest(self): ...
     @property
     def Sgen(self): ...
 ```
@@ -122,7 +123,9 @@ their `phase0`, `phase1`, ... arguments: the phase of a port is part of the unit
 | `run_sol()` | solves the unit; returns a result with `.success` for iterative units |
 | `Q`, `W` | heat and work added |
 | `Exth` | exergy of the heat duty |
-| `Exloss`, `Sgen`, `Exeff` | exergy destroyed, entropy generated, exergy efficiency |
+| `Exdest`, `Sgen`, `Exeff` | exergy destroyed (`T0*Sgen`, Gouy-Stodola), entropy generated, exergy efficiency |
+| `Exdest_balance`, `Exbalance_error` | exergy destroyed from the exergy balance of the unit; its difference to `Exdest` (0 when the exergy and entropy data of the streams agree) |
+| `Exloss` | exergy that leaves the unit to the environment as heat at T > T0 and is not used (`max(0, -Exth)`) |
 | `MBcheck()` | prints the relative mass balance error, returns in - out |
 
 Units that are evaluated explicitly need no `f_sol`.

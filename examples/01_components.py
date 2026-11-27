@@ -19,7 +19,7 @@ comp.F0.P = 1.0
 comp.F1.P = 5.0
 sol = comp.run_sol()
 print(f'compressor: converged={sol.success}, outlet {comp.F1.T:.1f} K, work {comp.W:.3f} kW, '
-      f'exergy destroyed {comp.Exloss:.3f} kW')
+      f'exergy destroyed {comp.Exdest:.3f} kW')
 
 cooler = heat.Heater('cooler', media.Air(), media.Air())
 cooler.F1.T = 310.0
