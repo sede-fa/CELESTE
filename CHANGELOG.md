@@ -8,6 +8,10 @@ version may notice.
 
 ### Added
 
+- **`PinchAnalyser` rewritten around one function** (the heat of the segments above or below a temperature): about
+  260 instead of 660 lines; the problem table, cascade, composite curves and grand composite curve all follow from it.
+  The grand composite curve is drawn with straight lines between the temperature levels (it was a step plot), latent
+  segments as flat pieces
 - **`SysBase.pfd()`**: interactive process flow diagram (layered layout, orthogonal streams, recycles dashed;
   stream state and composition and unit duties on hover) as one self-contained HTML file. The drawing is the
   framework-independent package `celeste.pfd` (`draw`, `UnitView`, `StreamView`, `Terminal`); units and flanges say
@@ -205,6 +209,8 @@ version may notice.
 
 | What | Before | Now | Size of the effect |
 |---|---|---|---|
+| `PinchAnalyser` composite curves | each curve started at the lowest temperature of *all* streams, so a curve whose streams start higher had a wrong first segment (methanol loop: cold curve from 30 instead of 40 °C) | each curve spans the temperatures of its own streams | plots only; `composite_curves` keys are now `hot`, `cold`, `hot_shifted`, `cold_shifted` (cold curves start at Q_C) |
+| `PinchAnalyser` with latent segments | latent heat was booked in the temperature interval above its level, so a condensing stream could heat a colder stream, and Q_H - Q_C did not always equal the stream balance (30 of 200 random cases) | latent heat at its level; targets equal those of a stream with a vanishing temperature glide | random cases: Q_H off by up to 295 kW before; sensible-only problems unchanged |
 | `CompIsent` outlet state | ideal-gas formula with the mean heat capacity of inlet and outlet, solved with `root` | real-gas isentropic outlet from the medium, then the efficiency correction (also used by the mapped compressors and turbines); explicit, so `run_sol` returns a result with `success=True` and `get_success()` no longer lists compressors | outlet temperature 511.43 → 512.49 K and work 6.290 → 6.321 kJ/s for air, 300 K, 1 → 5 bar, eff 0.8; the reversible case now has Sgen = 0 exactly (was 1e-4) |
 | `GPU_*` `Exloss`, `Sgen` | exergy in - exergy out (negative for a separation), ΔS | exergy in + W - exergy out = W - Wid ≥ 0; ΔS - Q_amb/T0, so Exloss = T0·Sgen | GPU rows of `exdest_df` grow by the separation work, e.g. 0.94 kW in `SOECSys` |
 | `SysBase.MBcheck()`, `EBcheck()` | sources and sinks only, `MBcheck` out - in; `EBcheck` from the heater / heat / work tables | boundary streams from the recorded connections, in - out; Σ(Q + W) of every unit | sign of `MBcheck`; `EBcheck` now closes for boxes without sources and sinks (e.g. `SOCsysRecupe`, `CO2Sys`) |

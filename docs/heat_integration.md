@@ -26,7 +26,9 @@ from celeste.HEN import PinchAnalyser
 
 pa = PinchAnalyser(streams, dt_min=10).solve()
 pa.summary()                      # hot_utility, cold_utility, heat_recovery, pinch temperatures
-pa.problem_table, pa.heat_cascade
+pa.problem_table, pa.heat_cascade  # intervals of shifted temperature, net heat surplus at each level
+pa.composite_curves['hot'], pa.composite_curves['cold']   # H, T (also '..._shifted'); cold starts at Q_C
+pa.grand_composite_curve          # H, T_shift, T_hot, T_cold
 pa.plot_summary()                 # composite curves + grand composite curve
 PinchAnalyser.sweep_dt_min(streams)   # targets against dt_min
 ```

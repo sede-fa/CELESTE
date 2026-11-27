@@ -146,3 +146,30 @@ def test_objective_min_units(four_streams):
 def test_objective_is_validated(four_streams):
     with pytest.raises(ValueError, match="objective"):
         HENSynthesiser(four_streams, 20).solve(objective='area')
+
+
+def test_composite_curves_start_at_the_stream_temperatures(four_streams):
+    """Each composite curve spans exactly the temperatures of its own streams; the cold one starts at Q_C."""
+    pa = PinchAnalyser(four_streams, 20).solve()
+    hot, cold = pa.composite_curves['hot'], pa.composite_curves['cold']
+    assert (hot['T'].iloc[0], hot['T'].iloc[-1]) == (60.0, 150.0) and hot.H.iloc[0] == 0.0
+    assert (cold['T'].iloc[0], cold['T'].iloc[-1]) == (20.0, 125.0)
+    assert cold.H.iloc[0] == pytest.approx(pa.cold_utility)
+    assert hot.H.iloc[-1] == pytest.approx(180 + 240) and cold.H.iloc[-1] - cold.H.iloc[0] == pytest.approx(262.5 + 225)
+    gcc = pa.grand_composite_curve                       # straight lines between the levels: one point per level
+    assert gcc.H.iloc[0] == pytest.approx(pa.hot_utility) and gcc.H.iloc[-1] == pytest.approx(pa.cold_utility)
+    assert len(gcc) == len(pa.problem_table) + 1
+
+
+def test_latent_segments_match_a_narrow_glide(four_streams):
+    """A latent segment gives the targets of a sensible stream with a very small temperature glide."""
+    latent = pd.DataFrame([dict(segment_id='cond', segment_type='latent', side='hot', T_phase=100.0, Q=60.0),
+                           dict(segment_id='boil', segment_type='latent', side='cold', T_phase=50.0, Q=40.0)])
+    pa = PinchAnalyser(pd.concat([four_streams, latent], ignore_index=True), 20).solve()
+    d = 1e-4
+    glide = table([('cond', 'hot', 100 + d/2, 100 - d/2, 60/d), ('boil', 'cold', 50 - d/2, 50 + d/2, 40/d)])
+    ref = PinchAnalyser(pd.concat([four_streams, glide], ignore_index=True), 20).solve()
+    assert pa.hot_utility == pytest.approx(ref.hot_utility, abs=1e-3) and pa.hot_utility == pytest.approx(72.5)
+    assert pa.cold_utility - pa.hot_utility == pytest.approx(60 - 40 + 180 + 240 - 262.5 - 225)   # energy balance
+    cond = pa.composite_curves['hot']
+    assert ((cond['T'] == 100.0).sum() == 2) and cond.H[cond['T'] == 100.0].diff().iloc[-1] == pytest.approx(60.0)
