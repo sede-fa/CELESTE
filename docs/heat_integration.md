@@ -158,3 +158,30 @@ difference. In the balance the heater that is replaced no longer takes `Q`, the 
 of heat, and the destruction of the cooler and heater that went with the recovered heat disappears; the balance
 `Ex_in = Ex_product + Exloss + Exdest` stays closed. `efficiency_no_integration` is the efficiency of the plant as
 solved. The streams of the network must be heaters of the system (external streams raise an error).
+
+## Verify the network in the flowsheet
+
+```python
+copy = plant.integrate(hen)                 # the duties of the network
+copy = plant.integrate(hen, mode='area')    # the areas of the network (U * area); the duties follow
+copy.hen_report                             # per exchanger and utility: Q_hen, Q_sim, approach temperatures
+copy.exergy_summary()                       # the integrated plant, simulated
+```
+
+`integrate` returns a solved **copy** of the system; the original is not changed. Every heater and cooler of the
+network is replaced by a chain: one `ExchangerSide` per stage of its exchangers (in flow order: stages 1..K for a hot
+stream, K..1 for a cold stream), then a trim heater or cooler to the original outlet temperature, which plays the
+utility. As in the synthesis, the branches of a stream split mix at one temperature, so a stage shared by several
+exchangers is one side carrying the sum of their duties. The chain takes over the flanges of the replaced unit, so
+the declared streams of the system stay as they are.
+
+* `mode='duty'`: each stage gets the duties of `hen.network`; the real property models give the temperatures, so the
+  report shows whether the approach temperatures hold (`approach_ok`, `attrs['min_approach']`) and the trim duties.
+* `mode='area'`: each exchanger keeps its UA; its duty follows from the effectiveness-NTU relation (counter-current)
+  at the simulated inlet temperatures and heat capacity flows, and the whole system is solved again until the
+  duties settle (`attrs['iterations']`).
+
+In the exergy balance the heat of an exchanger crosses at the mean temperature of its cold side: the hot side carries
+the destruction of the temperature difference, nothing is lost to the environment. `exergy_summary()` of the copy
+therefore checks `exergy_summary(hen=hen)` of the original. The streams of the network must be heaters of the system.
+

@@ -203,3 +203,75 @@ def test_integrated_exergy_needs_the_streams_of_the_system():
     hen = HENSynthesiser(pd.concat([train.pinch_stream_table(min_duty=0.0), cold]), dt_min=10).solve()
     with pytest.raises(ValueError, match='feedwater'):
         train.exergy_summary(hen=hen)
+
+
+@pytest.fixture(scope='module')
+def site():
+    """Methanol loop and an SNG plant side by side: four streams, a stream split in the network."""
+    from celeste.CSL import SysBase, flow, heat, media, reactors, turbomachinery
+    from celeste.CSL.systems.ProcessBoxes import MethanolLoop
+    gas = media.Fuel_CH4()
+
+    class SNG(SysBase):
+        def __init__(self, name):
+            super().__init__(dict(name=name))
+            self.feed = flow.SourceM(name + '.feed', gas, F1_n=300.0, F1_T=300.0, F1_P=1.0,
+                                     F1_Xi=np.array([0.79, 1e-6, 0.20, 1e-6, 1e-6, 0.01]))
+            self.comp = turbomachinery.CompIsent(name + '.comp', gas, eff=0.8)
+            self.comp.F1.P = 5.0
+            self.preheat = heat.Heater(name + '.preheat', gas)
+            self.preheat.F1.T = 600.0
+            self.reactor = reactors.MR(name + '.reactor', gas, T=600.0)
+            self.cooler = heat.Heater(name + '.cooler', gas)
+            self.cooler.F1.T = 313.15
+            self.product = flow.Sink(name + '.product', gas)
+            for a, b in [(self.feed.F1, self.comp.F0), (self.comp.F1, self.preheat.F0), (self.preheat.F1, self.reactor.F0),
+                         (self.reactor.F1, self.cooler.F0), (self.cooler.F1, self.product.F0)]:
+                self.link(a, b)
+
+    class Site(SysBase):
+        def __init__(self, name):
+            super().__init__(dict(name=name))
+            self.meoh = MethanolLoop(name + '.meoh')
+            self.sng = SNG(name + '.sng')
+
+        def seq_sol(self, store=False):
+            self.meoh.run_sol()
+            self.sng.run_sol()
+
+    s = Site('site')
+    s.run_sol()
+    return s, HENSynthesiser(s.pinch_stream_table(), dt_min=10).solve(objective='mer')
+
+
+def test_integrate_with_the_duties_of_the_network(site):
+    plant, hen = site
+    copy = plant.integrate(hen)
+    rep = copy.hen_report
+    assert copy is not plant and plant.meoh.preheat.__class__.__name__ == 'Heater'     # the original is untouched
+    assert type(copy.meoh.preheat).__name__ == 'StreamChain'
+    assert rep.dQ.abs().max() < 1e-6                         # duties and trim utilities as in the network
+    assert abs(copy.EBcheck()) < 1e-4
+    assert rep.attrs['min_approach'] == pytest.approx(rep[rep.kind == 'exchanger'][['dT_hot_end_sim', 'dT_cold_end_sim']].min().min())
+    # the integrated copy gives the exergy estimate of exergy_summary(hen=...)
+    est, sim = plant.exergy_summary(hen=hen), copy.exergy_summary()
+    assert sim.efficiency == pytest.approx(est.efficiency, rel=1e-4) and sim.Ex_in == pytest.approx(est.Ex_in, rel=1e-6)
+    assert sim.Exloss == pytest.approx(est.Exloss, rel=1e-6)
+
+
+def test_integrate_rating_with_the_areas(site):
+    plant, hen = site
+    rep = plant.integrate(hen, mode='area').hen_report
+    ex = rep[rep.kind == 'exchanger']
+    assert rep.attrs['mode'] == 'area' and rep.attrs['iterations'] > 1
+    assert (ex.Q_sim > 0).all() and (ex.dQ.abs() < 0.1*ex.Q_hen).all()      # close to the network, not equal
+    for name in hen.utilities.stream:                         # every stream still reaches its target temperature
+        row = rep[rep.item == name]
+        assert len(row) == 1
+
+
+def test_integrate_needs_heaters_of_the_system(four_streams):
+    from celeste.CSL.systems.ProcessBoxes import MethanolLoop
+    loop = MethanolLoop('m')
+    with pytest.raises(ValueError, match='not a unit'):
+        loop.integrate(HENSynthesiser(four_streams, 20).solve())

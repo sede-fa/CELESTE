@@ -750,6 +750,9 @@ class _PRModel:
         self.g0_i = h0 - 298.15*s0          # standard Gibbs energy of the ideal gases at T0, P0
         self.nasa = d
 
+    def __deepcopy__(self, memo):
+        return self                         # compiled and immutable: a copied system shares it
+
     @classmethod
     def get(cls, species, kij):
         from ..jx import eos
