@@ -8,6 +8,7 @@ version may notice.
 
 ### Added
 
+- **`SysBase.integrate(hen, mode='duty' | 'area')`**: a solved copy of the system with the synthesised heat exchanger network built in (every heater and cooler becomes its exchanger sides and a trim utility, `celeste.HEN.integrate`); `hen_report` compares network and simulation (duties, approach temperatures, trim utilities). `mode='area'` rates the exchangers by their areas. Systems can be deep-copied (the compiled Peng-Robinson model is shared); docs/heat_integration.md, Showcase notebook 3.4
 - **`PinchAnalyser` rewritten around one function** (the heat of the segments above or below a temperature): about
   260 instead of 660 lines; the problem table, cascade, composite curves and grand composite curve all follow from it.
   The grand composite curve is drawn with straight lines between the temperature levels (it was a step plot), latent

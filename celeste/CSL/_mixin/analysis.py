@@ -251,6 +251,16 @@ class ReportingMixin:
             tab['efficiency_no_integration'] = eff0
         return pd.Series(tab, name=self.name, dtype=float)
 
+    def integrate(self, hen, mode: str = 'duty', **kw):
+        """
+        A solved copy of this system with the heat exchanger network ``hen`` built in, to verify it: every heater
+        and cooler of the network becomes its exchanger sides and a trim heater or cooler. ``mode='duty'`` keeps
+        the duties of the network, ``mode='area'`` its areas (the duties follow). The comparison is the copy's
+        ``hen_report``. See ``celeste.HEN.integrate``.
+        """
+        from celeste.HEN.integrate import integrate
+        return integrate(self, hen, mode=mode, **kw)
+
     def hen_exergy(self, hen) -> pd.DataFrame:
         """
         Exergy of the heat recovered by the process-process exchangers of a heat exchanger network [kJ/s].
